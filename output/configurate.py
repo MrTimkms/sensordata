@@ -28,6 +28,6 @@ Mail_CONFIG = {
     'password': 'lbehqvlictarghue'                  # пароль       
 }
 
-DownloadedAttachments = {
+DATA_PATH_Conf = {
     'DownloadedAttachments': 'SensorData',          # путь куда сохранять файлы локально
 }
