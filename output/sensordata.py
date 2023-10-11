@@ -10,6 +10,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from configurate import SENSOR_TH_CONFIG, SENSOR_PYRANOMETER_CONFIG, Mail_CONFIG, DATA_PATH_Conf
+import logging
+
+# Настройка логирования
+logging.basicConfig(filename='program_log.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Путь для сохранения данных
 DATA_PATH = os.path.join(os.getcwd(), DATA_PATH_Conf['DownloadedAttachments'])
@@ -34,10 +38,6 @@ def save_data_to_csv(data, file_path):
         writer = csv.writer(file)
         writer.writerow(data)
 
-def write_log(message):
-    with open("program_log.txt", "a") as log_file:
-        log_file.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
-
 # Функция для отправки письма с вложением на почту
 def send_email(subject, body, attachment_path):
     smtp_server = Mail_CONFIG['smtp_server']
@@ -61,8 +61,7 @@ def send_email(subject, body, attachment_path):
             msg.attach(part)
     except FileNotFoundError:
         error_message = "Вложение не найдено. Отправка без него."
-        print(error_message)
-        write_log(error_message)
+        logging.warning(error_message)
 
     try:
         server = smtplib.SMTP_SSL(smtp_server, smtp_port)
@@ -70,11 +69,10 @@ def send_email(subject, body, attachment_path):
         text = msg.as_string()
         server.sendmail(login, login, text)
         server.quit()
-        write_log("Письмо успешно отправлено.")
+        logging.info("Письмо успешно отправлено.")
     except Exception as e:
         error_message = f"Ошибка при отправке письма: {str(e)}"
-        print(error_message)
-        write_log(error_message)
+        logging.error(error_message)
 
 # Основная функция для сбора данных с датчиков, сохранения и отправки на почту
 def main(sensor_delay):
@@ -91,7 +89,7 @@ def main(sensor_delay):
             humidity = sensorTH.read_register(0, 1)
             solar_radiation = pyranometer.read_register(0, 0)
 
-            write_log(
+            logging.info(
                 f"Текущий час: {current_hour}, Температура: {temperature}, Влажность: {humidity}, Солнечное излучение: {solar_radiation}")
 
             file_name = datetime.now().strftime("%Y%m%d_%H.csv")
@@ -105,8 +103,7 @@ def main(sensor_delay):
 
         except Exception as e:
             error_message = f"Ошибка при чтении данных: {str(e)}"
-            print(error_message)
-            write_log(error_message)
+            logging.error(error_message)
 
         finally:
             sensorTH.clear_buffers_before_each_transaction = True
