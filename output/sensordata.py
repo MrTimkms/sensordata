@@ -34,6 +34,10 @@ def save_data_to_csv(data, file_path):
         writer = csv.writer(file)
         writer.writerow(data)
 
+def write_log(message):
+    with open("program_log.txt", "a") as log_file:
+        log_file.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - {message}\n")
+
 # Функция для отправки письма с вложением на почту
 def send_email(subject, body, attachment_path):
     smtp_server = Mail_CONFIG['smtp_server']
@@ -45,9 +49,9 @@ def send_email(subject, body, attachment_path):
     msg['From'] = login
     msg['To'] = login  # Отправка письма себе
     msg['Subject'] = subject
-    
+
     msg.attach(MIMEText(body, 'plain'))
-    
+
     try:
         with open(attachment_path, "rb") as attachment:
             part = MIMEBase('application', 'octet-stream')
@@ -56,47 +60,54 @@ def send_email(subject, body, attachment_path):
             part.add_header('Content-Disposition', "attachment; filename= %s" % os.path.basename(attachment_path))
             msg.attach(part)
     except FileNotFoundError:
-        print("Вложение не найдено. Отправка без него.")
-    
+        error_message = "Вложение не найдено. Отправка без него."
+        print(error_message)
+        write_log(error_message)
+
     try:
         server = smtplib.SMTP_SSL(smtp_server, smtp_port)
         server.login(login, password)
         text = msg.as_string()
         server.sendmail(login, login, text)
         server.quit()
-        print("Письмо успешно отправлено.")
+        write_log("Письмо успешно отправлено.")
     except Exception as e:
-        print("Ошибка при отправке письма: {}".format(str(e)))
+        error_message = f"Ошибка при отправке письма: {str(e)}"
+        print(error_message)
+        write_log(error_message)
 
 # Основная функция для сбора данных с датчиков, сохранения и отправки на почту
 def main(sensor_delay):
     sensorTH = configure_sensor(SENSOR_TH_CONFIG)
     pyranometer = configure_sensor(SENSOR_PYRANOMETER_CONFIG)
     last_sent_hour = None  # Час последней отправки
-    
+
     while True:  # Бесконечный цикл
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             current_hour = datetime.now().hour
-            
+
             temperature = sensorTH.read_register(1, 1)
             humidity = sensorTH.read_register(0, 1)
             solar_radiation = pyranometer.read_register(0, 0)
-            
-            print("Текущий час: {}, Температура: {}, Влажность: {}, Солнечное излучение: {}".format(current_hour, temperature, humidity, solar_radiation))
-            
+
+            write_log(
+                f"Текущий час: {current_hour}, Температура: {temperature}, Влажность: {humidity}, Солнечное излучение: {solar_radiation}")
+
             file_name = datetime.now().strftime("%Y%m%d_%H.csv")
             file_path = os.path.join(DATA_PATH, file_name)
             save_data_to_csv([timestamp, temperature, humidity, solar_radiation], file_path)
-            
+
             # Если текущий час отличается от часа последней отправки, отправляем данные на почту
             if last_sent_hour != current_hour:
                 send_email("Данные с датчиков", "Во вложении данные с датчиков.", file_path)
                 last_sent_hour = current_hour
-              
+
         except Exception as e:
-            print("Ошибка при чтении данных: {}".format(str(e)))
-        
+            error_message = f"Ошибка при чтении данных: {str(e)}"
+            print(error_message)
+            write_log(error_message)
+
         finally:
             sensorTH.clear_buffers_before_each_transaction = True
             pyranometer.clear_buffers_before_each_transaction = True
