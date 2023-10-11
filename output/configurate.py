@@ -24,10 +24,23 @@ SENSOR_PYRANOMETER_CONFIG = {
 Mail_CONFIG = {
     'smtp_server': 'smtp.yandex.ru',                # сервер почты
     'smtp_port': '465',                             # порт, используем ssl
-    'login': 'gisknastu@yandex.ru',                 # почта
-    'password': 'lbehqvlictarghue'                  # пароль       
+    'login': '[ваша почта]',                 # почта
+    'password': '[ваш пароль]'                  # пароль       
 }
 
 DATA_PATH_Conf = {
     'DownloadedAttachments': 'SensorData',          # путь куда сохранять файлы локально
 }
+TELEGRAM_CONFIG = {
+    'TOKEN': '[ваш токен]'
+}
+# Конфигурация для управления OpenVPN и RealVNC
+OPENVPN_CONFIG = {
+    'command': 'your_openvpn_command'  # Замените на реальную команду для запуска OpenVPN
+}
+
+REALVNC_CONFIG = {
+    'command': 'your_realvnc_command'  # Замените на реальную команду для запуска RealVNC Server
+}
+
+ALLOWED_USERS = [123456789, 987654321]  # Замените на реальные ID пользователей
