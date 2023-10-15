@@ -42,7 +42,7 @@ OPENVPN_CONFIG = {
 }
 
 REALVNC_CONFIG = {
-    'command': '/usr/bin/vncserver :1 -geometry 1280x800'  # Команда для запуска RealVNC Server
+    'command': 'sudo vncserver-virtual'  # Команда для запуска RealVNC Server
 }
 
 NOTIFICATION_CONFIG = {

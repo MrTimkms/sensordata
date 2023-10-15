@@ -8,6 +8,8 @@ import logging
 import telebot
 import threading
 import dateparser
+import subprocess
+import socket
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -174,17 +176,19 @@ def start(message):
 @bot.message_handler(commands=['help'])
 def help_command(message):
     help_text = """
-    Это справка:
-    🌡️ /condition - получить текущие показания датчиков
-    📊 /getdata - получить данные в формате CSV
-    📈 /status - проверить статус системы
-    🔒 /openvpn - запустить VPN
-    🖥️ /vnc - запустить VNC
-    🌐 /ip - получить IP
-    пример ввода дат:
-    📊 /getdata 20231010
-    📊 /getdata 20231010 - 20231011
-    """
+       Это справка:
+       🌡️ /condition - получить текущие показания датчиков
+       📊 /getdata - получить данные в формате CSV
+       📈 /status - проверить статус системы
+       🔒 /openvpn - запустить VPN
+       🖥️ /vnc - запустить VNC
+       🌐 /ip - получить IP
+       🔄 /restartpi - перезапустить Raspberry Pi
+
+       Примеры ввода дат:
+       📊 /getdata 20231010
+       📊 /getdata 20231010 - 20231011
+       """
     bot.reply_to(message, help_text)
 
 @bot.message_handler(commands=['getdata'])
@@ -274,30 +278,121 @@ def run_openvpn_command(message):
     threading.Thread(target=run_openvpn).start()
     bot.reply_to(message, "Запущен процесс подключения к VPN. Ожидайте... 🔒")
 
-@bot.message_handler(commands=['vnc'])
-def run_vnc_command(message):
-    threading.Thread(target=run_realvnc).start()
-    bot.reply_to(message, "Запущен VNC сервер. Ожидайте... 🖥️")
-
 @bot.message_handler(commands=['ip'])
 def get_ip_command(message):
-    ip_address = get_current_ip()
-    bot.reply_to(message, f"Текущий IP-адрес: {ip_address} 🌐")
-
+    if message.from_user.id in ALLOWED_USERS:
+        ip_address = get_current_ip()
+        bot.reply_to(message, f"Текущий IP-адрес: {ip_address} 🌐")
+    else:
+        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
 @bot.message_handler(commands=['getip'])
 def get_ip_command(message):
-    ip_address = get_current_ip()
-    bot.reply_to(message, f"Текущий IP-адрес: {ip_address} 🌐")
-
+    if message.from_user.id in ALLOWED_USERS:
+        ip_address = get_current_ip()
+        bot.reply_to(message, f"Текущий IP-адрес: {ip_address} 🌐")
+    else:
+        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
 @bot.message_handler(commands=['openvpn'])
 def run_openvpn_command(message):
-    threading.Thread(target=run_openvpn).start()
-    bot.reply_to(message, "Запущен процесс подключения к VPN. Ожидайте... 🔒")
+    if message.from_user.id in ALLOWED_USERS:
+        threading.Thread(target=run_openvpn).start()
+        bot.reply_to(message, "Запущен процесс подключения к VPN. Ожидайте... 🔒")
+    else:
+        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
 
 @bot.message_handler(commands=['vnc'])
 def run_vnc_command(message):
-    threading.Thread(target=run_realvnc).start()
-    bot.reply_to(message, "Запущен VNC сервер. Ожидайте... 🖥️")
+    if message.from_user.id in ALLOWED_USERS:
+        threading.Thread(target=run_realvnc_and_send_ip, args=(message,)).start()
+    else:
+        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
+@bot.message_handler(commands=['restartpi'])
+def restart_raspberry_pi(message):
+    if message.from_user.id in ALLOWED_USERS:
+        os.system("sudo reboot")
+        bot.reply_to(message, "Перезапуск Raspberry Pi запущен. Пожалуйста, подождите...")
+    else:
+        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды. Только администраторы могут перезапустить Raspberry Pi.")
+
+def run_realvnc_and_send_ip(message):
+    try:
+        command = REALVNC_CONFIG['command']
+        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   universal_newlines=True)
+
+        # Заведем флаг для определения, был ли IP-адрес найден
+        ip_found = False
+
+        # Сюда будем записывать все выводы для отладки
+        full_output = ""
+
+        # Ждем, пока RealVNC Server выдаст IP-адрес и порт
+        for line in process.stdout:
+            # Записываем полный вывод для отладки
+            full_output += line
+
+            if "New desktop is" in line:
+                # Извлекаем IP-адрес и порт из строки
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    ip_address = parts[-1]
+                    ip_found = True
+                    break
+
+        if ip_found:
+            bot.send_message(message.chat.id, f"RealVNC Server запущен. IP-адрес и порт: {ip_address}")
+        else:
+            bot.send_message(message.chat.id, "Не удалось извлечь IP-адрес из RealVNC Server.")
+
+        # Записываем полный вывод в лог
+        logging.info("Полный вывод RealVNC Server:\n" + full_output)
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Ошибка при запуске RealVNC Server: {e}")
+        logging.error(f"Ошибка при запуске RealVNC Server: {e}")
+def run_realvnc():
+    try:
+        command = REALVNC_CONFIG['command']
+        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+
+        # Ждем, пока RealVNC Server выдаст IP-адрес и порт
+        ip_address = None
+        for line in process.stdout:
+            if "New desktop is" in line:
+                # Извлекаем IP-адрес и порт из строки
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    ip_address = parts[-1]
+
+        if ip_address:
+            # Отправляем IP-адрес и порт в Telegram
+            bot.send_message(TELEGRAM_CONFIG['your_chat_id'], f"RealVNC Server запущен. IP-адрес и порт: {ip_address}")
+        else:
+            logging.error("Не удалось извлечь IP-адрес из RealVNC Server.")
+    except Exception as e:
+        logging.error(f"Ошибка при запуске RealVNC Server: {e}")
+
+def run_openvpn():
+    try:
+        command = OPENVPN_CONFIG['command']
+        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   universal_newlines=True)
+
+        output, _ = process.communicate()
+
+        if process.returncode == 0:
+            logging.info("OpenVPN успешно запущен.")
+        else:
+            logging.error(f"Ошибка при запуске OpenVPN. Ошибка: {output}")
+    except Exception as e:
+        logging.error(f"Ошибка при запуске OpenVPN: {e}")
+def get_current_ip():
+    try:
+        # Получаем IP-адрес хоста
+        host_name = socket.gethostname()
+        host_ip = socket.gethostbyname(host_name)
+        return host_ip
+    except Exception as e:
+        return str(e)
 
 def run_bot():
     while True:
