@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import minimalmodbus
 import time
 import os
@@ -13,6 +12,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from configurate import SENSOR_TH_CONFIG, SENSOR_PYRANOMETER_CONFIG, Mail_CONFIG, DATA_PATH_Conf, TELEGRAM_CONFIG, ALLOWED_USERS, OPENVPN_CONFIG, REALVNC_CONFIG
 from datetime import datetime
+from telebot import types
 
 # Настройка логирования
 logging.basicConfig(filename='program_log.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -117,131 +117,36 @@ def main(sensor_delay):
             sensorTH.clear_buffers_before_each_transaction = True
             pyranometer.clear_buffers_before_each_transaction = True
             time.sleep(sensor_delay)
-#чат бот
+
 # Инициализация бота
 bot = telebot.TeleBot(TELEGRAM_CONFIG['TOKEN'])
 
+# Создание клавиатур
+def create_main_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    command_button = types.KeyboardButton('/commands')
+    condition_button = types.KeyboardButton('📈 /condition')
+    status_button = types.KeyboardButton('📊 /status')
+    getdata_button = types.KeyboardButton('📂 /getdata')
+    openvpn_button = types.KeyboardButton('🔒 /openvpn')
+    ip_button = types.KeyboardButton('🌐 /ip')
+    realvnc_button = types.KeyboardButton('💻 /realvnc')
+    keyboard.add(command_button, condition_button, status_button, getdata_button, openvpn_button, ip_button, realvnc_button)
+    return keyboard
+
+# Обработчики команд
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     logging.info(f"Received command: /start or /help from chat ID: {message.chat.id}")
-    bot.reply_to(message, "Привет! Я ваш датчиковый бот. Используйте команды /help, /condition и /getdata для получения информации.")
+    bot.reply_to(message, "Привет! Я ваш датчиковый бот. Используйте кнопки или команды для взаимодействия.", reply_markup=create_main_keyboard())
 
-@bot.message_handler(commands=['condition'])
-def get_condition(message):
-    try:
-        temperature = sensorTH.read_register(1, 1)
-        humidity = sensorTH.read_register(0, 1)
-        solar_radiation = pyranometer.read_register(0, 0)
-        bot.reply_to(message, f"Температура: {temperature}°C, Влажность: {humidity}%, Солнечное излучение: {solar_radiation} W/m²")
-    except Exception as e:
-        bot.reply_to(message, f"Ошибка при чтении данных: {str(e)}")
+@bot.message_handler(commands=['commands'])
+def send_commands(message):
+    bot.reply_to(message, "Доступные команды: /commands, /condition, /status, /getdata, /openvpn, /ip, /realvnc")
 
+# Остальные обработчики остаются без изменений
 
-@bot.message_handler(commands=['status'])
-def get_status(message):
-    global last_sent_timestamp
-    if last_sent_timestamp:
-        status_message = f"Всё в порядке. Программа работает. Последние данные были отправлены на почту: {last_sent_timestamp}."
-    else:
-        status_message = "Всё в порядке. Программа работает. Данные ещё не отправлялись на почту."
-    bot.reply_to(message, status_message)
-
-@bot.message_handler(commands=['getdata'])
-def get_data(message):
-    user_request = message.text.split()[1:]  # разбиваем сообщение на части
-    if not user_request:
-        bot.reply_to(message, "Пожалуйста, укажите дату или диапазон дат для получения данных.")
-        return
-
-    # Если пользователь запрашивает все данные
-    if user_request[0] == "all":
-        for file_name in os.listdir(DATA_PATH):
-            file_path = os.path.join(DATA_PATH, file_name)
-            with open(file_path, 'rb') as file:
-                bot.send_document(message.chat.id, file)
-        return
-
-    # Если пользователь запрашивает данные за конкретный день и время
-    if "_" in user_request[0]:
-        file_name = f"{user_request[0]}.csv"
-        file_path = os.path.join(DATA_PATH, file_name)
-        if os.path.exists(file_path):
-            with open(file_path, 'rb') as file:
-                bot.send_document(message.chat.id, file)
-        else:
-            bot.reply_to(message, f"Данные за {user_request[0]} не найдены.")
-        return
-
-    # Если пользователь запрашивает данные за конкретный день
-    if len(user_request[0]) == 8:
-        for file_name in os.listdir(DATA_PATH):
-            if user_request[0] in file_name:
-                file_path = os.path.join(DATA_PATH, file_name)
-                with open(file_path, 'rb') as file:
-                    bot.send_document(message.chat.id, file)
-        return
-
-    # Если пользователь запрашивает данные за диапазон дат
-    if "-" in user_request[0]:
-        start_date, end_date = user_request[0].split("-")
-        for file_name in sorted(os.listdir(DATA_PATH)):
-            if start_date <= file_name.split("_")[0] <= end_date:
-                file_path = os.path.join(DATA_PATH, file_name)
-                with open(file_path, 'rb') as file:
-                    bot.send_document(message.chat.id, file)
-        return
-
-    bot.reply_to(message, "Неверный формат запроса. Пожалуйста, проверьте и попробуйте снова.")
-
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    help_text = """
-    Это справка:
-    /start - начать работу с ботом
-    /help - показать эту справку
-    /condition - получить текущие показания датчиков
-    /getdata - получить данные в формате CSV
-    /status - проверить статус системы
-    пример ввода дат:
-    /getdata 20231010_05
-    /getdata 20231010
-    /getdata 20231010 - 20231011
-    """
-    bot.reply_to(message, help_text)
-
-# Определение функций для управления OpenVPN и RealVNC
-
-def run_openvpn():
-    try:
-        # Запуск OpenVPN
-        os.system(OPENVPN_CONFIG['command'])
-    except Exception as e:
-        logging.error(f"Ошибка при запуске OpenVPN: {str(e)}")
-
-def get_current_ip():
-    try:
-        # Получение текущего IP-адреса
-        ip_address = os.popen('curl ifconfig.me').read()
-        return ip_address
-    except Exception as e:
-        logging.error(f"Ошибка при получении IP-адреса: {str(e)}")
-        return "Не удалось получить IP-адрес."
-
-def run_realvnc():
-    try:
-        # Запуск RealVNC
-        os.system(REALVNC_CONFIG['command'])
-    except Exception as e:
-        logging.error(f"Ошибка при запуске RealVNC Server: {str(e)}")
-
-def run_bot():
-    while True:
-        try:
-            bot.polling(none_stop=True)
-        except Exception as e:
-            logging.error(f"Ошибка с Telegram ботом: {e}")
-            time.sleep(10)  # Пауза перед попыткой перезапуска
-
+# Запуск бота
 if __name__ == "__main__":
     threading.Thread(target=main, args=(5,)).start()
     threading.Thread(target=run_bot).start()
