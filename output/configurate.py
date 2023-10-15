@@ -7,7 +7,8 @@ SENSOR_TH_CONFIG = {
     'bytesize': 8,                                  # количество бит данных
     'parity': minimalmodbus.serial.PARITY_NONE,     # контроль четности
     'stopbits': 1,                                  # количество стоповых бит
-    'timeout': 1                                    # максимальное время ожидания ответа, сек
+    'timeout': 1,                                    # максимальное время ожидания ответа, сек
+    'delay': 5                                      # Задержка между измерениями (в секундах)
 }
 
 # Конфигурация Modbus пиранометра (датчика уровня солнечного излучения)
@@ -34,13 +35,18 @@ DATA_PATH_Conf = {
 TELEGRAM_CONFIG = {
     'TOKEN': '[ваш токен]'
 }
-# Конфигурация для управления OpenVPN и RealVNC
+
+ALLOWED_USERS = [123456789, 987654321]  # Замените на реальные ID пользователей
 OPENVPN_CONFIG = {
-    'command': 'your_openvpn_command'  # Замените на реальную команду для запуска OpenVPN
+    'command': 'sudo openvpn your_vpn_config.ovpn'  # Команда для запуска OpenVPN
 }
 
 REALVNC_CONFIG = {
-    'command': 'your_realvnc_command'  # Замените на реальную команду для запуска RealVNC Server
+    'command': '/usr/bin/vncserver :1 -geometry 1280x800'  # Команда для запуска RealVNC Server
 }
 
-ALLOWED_USERS = [123456789, 987654321]  # Замените на реальные ID пользователей
+NOTIFICATION_CONFIG = {
+    'high_temperature_threshold': 30,  # Порог для уведомления о высокой температуре
+    'low_temperature_threshold': -20,   # Порог для уведомления о низкой температуре
+    'notification_interval_hours': 1  # Интервал для отправки уведомлений (в часах)
+}
