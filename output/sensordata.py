@@ -9,7 +9,7 @@ import telebot
 import threading
 import dateparser
 import subprocess
-import socket
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -87,7 +87,7 @@ def send_email(subject, body, attachment_path):
 sensorTH = configure_sensor(SENSOR_TH_CONFIG)
 pyranometer = configure_sensor(SENSOR_PYRANOMETER_CONFIG)
 
-# Функция для сбора данных с датчиков температуры и влажности
+# Функция для сбора данных с датчиков температуры
 def collect_sensor_data(sensor, sensor_name):
     try:
         value = sensor.read_register(1, 1)
@@ -115,7 +115,6 @@ def collect_humidity_data(sensor, sensor_name):
         return None
 
 # Основная функция для сбора данных с датчиков, сохранения и отправки на почту
-# Основная функция для сбора данных с датчиков, сохранения и отправки на почту
 def main(sensor_delay):
     global sensorTH, pyranometer
     last_sent_hour = None
@@ -133,9 +132,14 @@ def main(sensor_delay):
 
                 # Сохранение данных в CSV файл
                 data_to_save = [timestamp, temperature, humidity, solar_radiation]
-                csv_filename = f"sensor_data_{timestamp.split()[0]}.csv"
+                csv_filename = f"{timestamp}.csv"
                 csv_file_path = os.path.join(DATA_PATH, csv_filename)
                 save_data_to_csv(data_to_save, csv_file_path)
+            # Если текущий час отличается от часа последней отправки, отправляем данные на почту
+            if last_sent_hour != current_hour:
+                send_email("Данные с датчиков", "Во вложении данные с датчиков.", csv_file_path)
+                last_sent_hour = current_hour
+
         except Exception as e:
             error_message = f"Ошибка при чтении данных: {str(e)}"
             logging.error(error_message)
@@ -176,7 +180,6 @@ def start(message):
 @bot.message_handler(commands=['help'])
 def help_command(message):
     help_text = """
-       Это справка:
        🌡️ /condition - получить текущие показания датчиков
        📊 /getdata - получить данные в формате CSV
        📈 /status - проверить статус системы
@@ -238,7 +241,7 @@ def get_condition(message):
     try:
         temperature = collect_sensor_data(sensorTH, "датчик температуры")
         solar_radiation = collect_solar_radiation_data(pyranometer, "датчик солнечной радиации")
-        humidity = collect_sensor_data(sensorTH, "датчик влажности")
+        humidity = collect_humidity_data(sensorTH, "датчик влажности")
 
         if temperature is not None and solar_radiation is not None:
             bot.reply_to(
@@ -272,20 +275,7 @@ def get_status(message):
         status_message += f"\nПоследнее уведомление о низкой температуре было отправлено {last_low_temperature_notification_sent}."
 
     bot.reply_to(message, status_message)
-
-@bot.message_handler(commands=['openvpn'])
-def run_openvpn_command(message):
-    threading.Thread(target=run_openvpn).start()
-    bot.reply_to(message, "Запущен процесс подключения к VPN. Ожидайте... 🔒")
-
 @bot.message_handler(commands=['ip'])
-def get_ip_command(message):
-    if message.from_user.id in ALLOWED_USERS:
-        ip_address = get_current_ip()
-        bot.reply_to(message, f"Текущий IP-адрес: {ip_address} 🌐")
-    else:
-        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
-@bot.message_handler(commands=['getip'])
 def get_ip_command(message):
     if message.from_user.id in ALLOWED_USERS:
         ip_address = get_current_ip()
@@ -387,12 +377,13 @@ def run_openvpn():
         logging.error(f"Ошибка при запуске OpenVPN: {e}")
 def get_current_ip():
     try:
-        # Получаем IP-адрес хоста
-        host_name = socket.gethostname()
-        host_ip = socket.gethostbyname(host_name)
-        return host_ip
+        response = requests.get("http://ipinfo.io/ip")
+        if response.status_code == 200:
+            return response.text.strip()
+        else:
+            return "Error: Unable to fetch IP address"
     except Exception as e:
-        return str(e)
+        return f"Error: {str(e)}"
 
 def run_bot():
     while True:
