@@ -132,7 +132,7 @@ def main(sensor_delay):
 
                 # Сохранение данных в CSV файл
                 data_to_save = [timestamp, temperature, humidity, solar_radiation]
-                csv_filename = f"{timestamp}.csv"
+                csv_filename = datetime.now().strftime("%Y%m%d_%H.csv")
                 csv_file_path = os.path.join(DATA_PATH, csv_filename)
                 save_data_to_csv(data_to_save, csv_file_path)
             # Если текущий час отличается от часа последней отправки, отправляем данные на почту
