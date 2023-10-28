@@ -10,6 +10,7 @@ import threading
 import dateparser
 import subprocess
 import requests
+import re
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -23,7 +24,8 @@ logging.basicConfig(filename='program_log.log', level=logging.INFO, format='%(as
 last_sent_timestamp = None
 last_high_temperature_notification_sent = None
 last_low_temperature_notification_sent = None
-
+# Получение имени файла лога из настроек логирования
+log_file_path = logging.getLogger().handlers[0].baseFilename
 # Путь для сохранения данных
 DATA_PATH = os.path.join(os.getcwd(), DATA_PATH_Conf['DownloadedAttachments'])
 
@@ -208,34 +210,41 @@ def get_data(message):
                 bot.send_document(message.chat.id, file)
         return
 
-    date_format = dateparser.parse(user_request[0])
+    if user_request[0] == "сегодня":
+        today = datetime.now().date()
+        start_date = datetime(today.year, today.month, today.day)
+        end_date = start_date + timedelta(days=1)
+    elif user_request[0] == "вчера":
+        yesterday = datetime.now().date() - timedelta(days=1)
+        start_date = datetime(yesterday.year, yesterday.month, yesterday.day)
+        end_date = start_date + timedelta(days=1)
+    else:
+        requested_date = user_request[0]
 
-    if date_format:
+        # Пробуем найти файлы в формате "ггггммдд_чч"
+        requested_datetime = None
+        if '_' in requested_date:
+            try:
+                requested_datetime = datetime.strptime(requested_date, "%Y%m%d_%H")
+            except ValueError:
+                requested_datetime = None
+
+        # Модифицируем запрос, чтобы добавить символ '_' в конце, чтобы искать все файлы, начинающиеся с этой даты
+        modified_request = requested_date + "_"
+
         for file_name in os.listdir(DATA_PATH):
-            file_timestamp = datetime.strptime(file_name.split("_")[0], "%Y%m%d")
-            if file_timestamp.date() == date_format.date():
+            if file_name.startswith(requested_date) or (requested_datetime and file_name.startswith(modified_request)):
                 file_path = os.path.join(DATA_PATH, file_name)
                 with open(file_path, 'rb') as file:
                     bot.send_document(message.chat.id, file)
         return
 
-    if len(user_request) == 1:
-        bot.reply_to(message, "Не удалось найти данные для указанной даты. ⚠️")
-    else:
-        start_date_format = dateparser.parse(user_request[0])
-        end_date_format = dateparser.parse(user_request[1])
-
-        if start_date_format and end_date_format:
-            for file_name in os.listdir(DATA_PATH):
-                file_timestamp = datetime.strptime(file_name.split("_")[0], "%Y%m%d")
-                if start_date_format.date() <= file_timestamp.date() <= end_date_format.date():
-                    file_path = os.path.join(DATA_PATH, file_name)
-                    with open(file_path, 'rb') as file:
-                        bot.send_document(message.chat.id, file)
-            return
-
-        bot.reply_to(message, "Неверный формат запроса. Пожалуйста, проверьте и попробуйте снова. ⚠️")
-
+    for file_name in os.listdir(DATA_PATH):
+        if file_name.startswith(user_request[0]):
+            file_path = os.path.join(DATA_PATH, file_name)
+            with open(file_path, 'rb') as file:
+                bot.send_document(message.chat.id, file)
+    bot.reply_to(message, "Неверный формат запроса. Пожалуйста, проверьте и попробуйте снова. ⚠️")
 @bot.message_handler(commands=['condition'])
 def get_condition(message):
     try:
@@ -303,7 +312,18 @@ def restart_raspberry_pi(message):
         bot.reply_to(message, "Перезапуск Raspberry Pi запущен. Пожалуйста, подождите...")
     else:
         bot.reply_to(message, "У вас нет разрешения на выполнение этой команды. Только администраторы могут перезапустить Raspberry Pi.")
-
+@bot.message_handler(commands=['downloadlog'])
+def download_log(message):
+    try:
+        # Проверяем, существует ли файл лога
+        if os.path.exists(log_file_path):
+            # Отправляем лог-файл как документ
+            with open(log_file_path, 'rb') as log_file:
+                bot.send_document(message.chat.id, log_file)
+        else:
+            bot.reply_to(message, "Файл лога не найден.")
+    except Exception as e:
+        bot.reply_to(message, f"Ошибка при скачивании лога: {str(e)}")
 def run_realvnc_and_send_ip(message):
     try:
         command = REALVNC_CONFIG['command']
