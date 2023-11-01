@@ -120,6 +120,8 @@ def collect_humidity_data(sensor, sensor_name):
 def main(sensor_delay):
     global sensorTH, pyranometer
     last_sent_hour = None
+    last_csv_file_path = None  # Добавляем переменную для хранения пути к файлу предыдущего часа
+
     while True:
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -137,15 +139,18 @@ def main(sensor_delay):
                 csv_filename = datetime.now().strftime("%Y%m%d_%H.csv")
                 csv_file_path = os.path.join(DATA_PATH, csv_filename)
                 save_data_to_csv(data_to_save, csv_file_path)
-            # Если текущий час отличается от часа последней отправки, отправляем данные на почту
-            if last_sent_hour != current_hour:
-                send_email("Данные с датчиков", "Во вложении данные с датчиков.", csv_file_path)
-                last_sent_hour = current_hour
 
+                if last_sent_hour is None:
+                    last_sent_hour = current_hour  # Установите текущий час как последний, чтобы данные отправились в начале следующего часа
+                elif current_hour > last_sent_hour:
+                    if last_csv_file_path is not None:
+                        # Отправляем данные из файла предыдущего часа
+                        send_email("Данные с датчиков", "Во вложении данные с датчиков.", last_csv_file_path)
+                    last_sent_hour = current_hour
+                last_csv_file_path = csv_file_path  # Сохраняем путь к файлу текущего часа
         except Exception as e:
             error_message = f"Ошибка при чтении данных: {str(e)}"
             logging.error(error_message)
-
         finally:
             sensorTH.clear_buffers_before_each_transaction = True
             pyranometer.clear_buffers_before_each_transaction = True
