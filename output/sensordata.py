@@ -18,7 +18,6 @@ from email import encoders
 from configurate import SENSOR_TH_CONFIG, SENSOR_PYRANOMETER_CONFIG, Mail_CONFIG, DATA_PATH_Conf, TELEGRAM_CONFIG, ALLOWED_USERS, OPENVPN_CONFIG, REALVNC_CONFIG, NOTIFICATION_CONFIG
 from datetime import datetime, timedelta
 from telebot import types
-
 # Настройка логирования
 logging.basicConfig(filename='program_log.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 last_sent_timestamp = None
@@ -92,11 +91,17 @@ pyranometer = configure_sensor(SENSOR_PYRANOMETER_CONFIG)
 # Функция для сбора данных с датчиков температуры
 def collect_sensor_data(sensor, sensor_name):
     try:
-        value = sensor.read_register(1, 1)
-        return value
+        raw_value = sensor.read_register(1, 1)
+        converted_value = convert_temperature(raw_value)
+        return converted_value
     except Exception as e:
         logging.error(f"Ошибка при чтении данных с {sensor_name}: {str(e)}")
         return None
+
+def convert_temperature(temperature):
+    signed_int_value = temperature if temperature < 32768 else temperature - 65536
+    return signed_int_value
+
 
 # Функция для сбора данных с датчика солнечной радиации
 def collect_solar_radiation_data(sensor, sensor_name):
@@ -115,17 +120,35 @@ def collect_humidity_data(sensor, sensor_name):
     except Exception as e:
         logging.error(f"Ошибка при чтении данных с {sensor_name}: {str(e)}")
         return None
+def log_disconnect(last_sent_datetime, timestamp, allowed_users):
+    if last_sent_datetime is not None and (timestamp - last_sent_datetime) >= timedelta(hours=1):
+        # Уведомление в Telegram
+        disconnect_message = f"Отключение обнаружено. Последняя отправка: {last_sent_datetime}, Текущая дата: {timestamp}, Разница: {timestamp - last_sent_datetime}"
+        for user_id in allowed_users:
+            bot.send_message(user_id, disconnect_message)
+
+        # Запись информации в базу данных
+        with open("disconnect_log.txt", "a") as log_file:
+            log_file.write(f"Последняя отправка: {last_sent_datetime}, Текущая дата: {timestamp}, Разница: {timestamp - last_sent_datetime}\n")
+def get_last_sent_datetime(data_path):
+    latest_file = max([os.path.join(data_path, f) for f in os.listdir(data_path)], key=os.path.getctime)
+    with open(latest_file, "r") as file:
+        last_line = file.readlines()[-1]
+        last_sent_datetime = dateparser.parse(last_line.split(',')[0])
+        return last_sent_datetime
 
 # Основная функция для сбора данных с датчиков, сохранения и отправки на почту
 def main(sensor_delay):
-    global sensorTH, pyranometer
+    global sensorTH, pyranometer, last_sent_hour, last_csv_file_path, current_hour
     last_sent_hour = None
     last_csv_file_path = None  # Добавляем переменную для хранения пути к файлу предыдущего часа
 
     while True:
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            current_hour = datetime.now().hour
+            current_hour = datetime.now().strftime("%Y-%m-%d %H")
+           #last_sent_datetime = get_last_sent_datetime(DATA_PATH)
+           #log_disconnect(last_sent_datetime, timestamp, ALLOWED_USERS)
 
             temperature = collect_sensor_data(sensorTH, "датчик температуры")
             solar_radiation = collect_solar_radiation_data(pyranometer, "датчик солнечной радиации")
@@ -142,7 +165,7 @@ def main(sensor_delay):
 
                 if last_sent_hour is None:
                     last_sent_hour = current_hour  # Установите текущий час как последний, чтобы данные отправились в начале следующего часа
-                elif current_hour > last_sent_hour:
+                elif current_hour != last_sent_hour:
                     if last_csv_file_path is not None:
                         # Отправляем данные из файла предыдущего часа
                         send_email("Данные с датчиков", "Во вложении данные с датчиков.", last_csv_file_path)
