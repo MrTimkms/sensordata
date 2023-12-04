@@ -15,9 +15,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from configurate import SENSOR_TH_CONFIG, SENSOR_PYRANOMETER_CONFIG, Mail_CONFIG, DATA_PATH_Conf, TELEGRAM_CONFIG, ALLOWED_USERS, OPENVPN_CONFIG, REALVNC_CONFIG, NOTIFICATION_CONFIG
+from configurate import SENSOR_TH_CONFIG, SENSOR_PYRANOMETER_CONFIG, Mail_CONFIG, DATA_PATH_Conf, TELEGRAM_CONFIG, \
+    ALLOWED_USERS, OPENVPN_CONFIG, REALVNC_CONFIG, NOTIFICATION_CONFIG
 from datetime import datetime, timedelta
 from telebot import types
+from clicker import run_clicker
+
 # Настройка логирования
 logging.basicConfig(filename='program_log.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 last_sent_timestamp = None
@@ -31,6 +34,7 @@ DATA_PATH = os.path.join(os.getcwd(), DATA_PATH_Conf['DownloadedAttachments'])
 if not os.path.exists(DATA_PATH):
     os.makedirs(DATA_PATH)
 
+
 # Функция для конфигурации датчика
 def configure_sensor(config):
     sensor = minimalmodbus.Instrument(config['port'], config['address'])
@@ -41,11 +45,13 @@ def configure_sensor(config):
     sensor.serial.timeout = config['timeout']
     return sensor
 
+
 # Функция для сохранения данных в CSV
 def save_data_to_csv(data, file_path):
     with open(file_path, mode='a', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(data)
+
 
 # Функция для отправки письма с вложением на почту
 def send_email(subject, body, attachment_path):
@@ -85,8 +91,10 @@ def send_email(subject, body, attachment_path):
         error_message = f"Ошибка при отправке письма: {str(e)}"
         logging.error(error_message)
 
+
 sensorTH = configure_sensor(SENSOR_TH_CONFIG)
 pyranometer = configure_sensor(SENSOR_PYRANOMETER_CONFIG)
+
 
 # Функция для сбора данных с датчиков температуры
 def collect_sensor_data(sensor, sensor_name):
@@ -98,8 +106,10 @@ def collect_sensor_data(sensor, sensor_name):
         logging.error(f"Ошибка при чтении данных с {sensor_name}: {str(e)}")
         return None
 
+
 def convert_temperature(temperature):
-    signed_int_value = temperature if temperature < 32768 else temperature - 65536
+    # Преобразование 16-битного числа в знаковое целое
+    signed_int_value = (temperature - 6554) if temperature >= 3276 else temperature
     return signed_int_value
 
 
@@ -112,6 +122,7 @@ def collect_solar_radiation_data(sensor, sensor_name):
         logging.error(f"Ошибка при чтении данных с {sensor_name}: {str(e)}")
         return None
 
+
 # Функция для сбора данных с датчика влажности
 def collect_humidity_data(sensor, sensor_name):
     try:
@@ -120,6 +131,8 @@ def collect_humidity_data(sensor, sensor_name):
     except Exception as e:
         logging.error(f"Ошибка при чтении данных с {sensor_name}: {str(e)}")
         return None
+
+
 def log_disconnect(last_sent_datetime, timestamp, allowed_users):
     if last_sent_datetime is not None and (timestamp - last_sent_datetime) >= timedelta(hours=1):
         # Уведомление в Telegram
@@ -129,13 +142,17 @@ def log_disconnect(last_sent_datetime, timestamp, allowed_users):
 
         # Запись информации в базу данных
         with open("disconnect_log.txt", "a") as log_file:
-            log_file.write(f"Последняя отправка: {last_sent_datetime}, Текущая дата: {timestamp}, Разница: {timestamp - last_sent_datetime}\n")
+            log_file.write(
+                f"Последняя отправка: {last_sent_datetime}, Текущая дата: {timestamp}, Разница: {timestamp - last_sent_datetime}\n")
+
+
 def get_last_sent_datetime(data_path):
     latest_file = max([os.path.join(data_path, f) for f in os.listdir(data_path)], key=os.path.getctime)
     with open(latest_file, "r") as file:
         last_line = file.readlines()[-1]
         last_sent_datetime = dateparser.parse(last_line.split(',')[0])
         return last_sent_datetime
+
 
 # Основная функция для сбора данных с датчиков, сохранения и отправки на почту
 def main(sensor_delay):
@@ -147,20 +164,45 @@ def main(sensor_delay):
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             current_hour = datetime.now().strftime("%Y-%m-%d %H")
-           #last_sent_datetime = get_last_sent_datetime(DATA_PATH)
-           #log_disconnect(last_sent_datetime, timestamp, ALLOWED_USERS)
+            # last_sent_datetime = get_last_sent_datetime(DATA_PATH)
+            # log_disconnect(last_sent_datetime, timestamp, ALLOWED_USERS)
 
             temperature = collect_sensor_data(sensorTH, "датчик температуры")
             solar_radiation = collect_solar_radiation_data(pyranometer, "датчик солнечной радиации")
             humidity = collect_humidity_data(sensorTH, "датчик влажности")
 
             if temperature is not None and solar_radiation is not None:
-                logging.info(f"Текущий час: {current_hour}, Температура: {temperature}°C, Влажность: {humidity}%, Солнечное излучение: {solar_radiation} W/m²")
+                logging.info(
+                    f"Текущий час: {current_hour}, Температура: {temperature}°C, Влажность: {humidity}%, Солнечное излучение: {solar_radiation} W/m²")
 
-                # Сохранение данных в CSV файл
-                data_to_save = [timestamp, temperature, humidity, solar_radiation]
+                result_from_second_program = run_clicker()
+
+                # Разбор и сохранение значений
+                value1, value2, value3, value4, value5, value6, value7, value8, value9 = result_from_second_program
+                numeric_values = []
+
+                for value in [value1, value2, value3, value4, value5, value6, value7, value8, value9]:
+                    try:
+                        numeric_values.append(float(value))
+                    except (ValueError, TypeError):
+                        # Если не удается преобразовать в float, оставляем значение как есть
+                        numeric_values.append(value)
                 csv_filename = datetime.now().strftime("%Y%m%d_%H.csv")
                 csv_file_path = os.path.join(DATA_PATH, csv_filename)
+                # Добавление заголовков в данные для CSV файла
+                headers = ["Timestamp", "Temperature", "Humidity", "Solar Radiation", "Solar Input 1", "Solar Input W",
+                           "Solar Input KwH", "Extern Input V", "BatV", "Bat Charge 1", "Bat Charge W", "Bat Total KwH",
+                           "Bat Capacity"]
+                # Проверяем, существует ли файл
+                file_exists = os.path.isfile(csv_file_path)
+                if not file_exists:
+                    # Если файл не существует, записываем заголовки
+                    with open(csv_file_path, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(headers)
+                data_to_save = [timestamp, temperature, humidity, solar_radiation] + numeric_values
+
+
                 save_data_to_csv(data_to_save, csv_file_path)
 
                 if last_sent_hour is None:
@@ -179,6 +221,8 @@ def main(sensor_delay):
             pyranometer.clear_buffers_before_each_transaction = True
             sensorTH.clear_buffers_before_each_transaction = True
             time.sleep(sensor_delay)
+
+
 # Функция для отправки уведомления в Telegram
 def send_notification(subject, message):
     try:
@@ -189,23 +233,60 @@ def send_notification(subject, message):
         error_message = f"Ошибка при отправке уведомления: {str(e)}"
         logging.error(error_message)
 
+
 # Инициализация бота
 bot = telebot.TeleBot(TELEGRAM_CONFIG['token'])
+
 
 @bot.message_handler(commands=['start'])
 def start(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    condition_button = types.KeyboardButton("🌡️ Показания датчиков")
-    data_button = types.KeyboardButton("📊 Получить данные")
-    status_button = types.KeyboardButton("📈 Статус системы")
-    openvpn_button = types.KeyboardButton("🔒 Запустить VPN")
-    vnc_button = types.KeyboardButton("🖥️ Запустить VNC")
-    ip_button = types.KeyboardButton("🌐 Получить IP")
+    #condition_button = types.KeyboardButton("🌡️ Показания датчиков")
+    #data_button = types.KeyboardButton("📊 Получить данные")
+    #status_button = types.KeyboardButton("📈 Статус системы")
+    #openvpn_button = types.KeyboardButton("🔒 Запустить VPN")
+    #vnc_button = types.KeyboardButton("🖥️ Запустить VNC")
+    #ip_button = types.KeyboardButton("🌐 Получить IP")
 
-    markup.row(condition_button, data_button, status_button)
-    markup.row(openvpn_button, vnc_button, ip_button)
+    #markup.row(condition_button, data_button, status_button)
+    #markup.row(openvpn_button, vnc_button, ip_button)
 
     bot.send_message(message.chat.id, "Привет! Я ваш датчиковый бот. Выберите действие:", reply_markup=markup)
+
+@bot.message_handler(commands=['contrinfo'])
+def contrinfo_command(message):
+    try:
+        result_from_second_program = run_clicker()
+
+        # Разбор и сохранение значений
+        value1, value2, value3, value4, value5, value6, value7, value8, value9 = result_from_second_program
+        numeric_values = []
+
+        for value in [value1, value2, value3, value4, value5, value6, value7, value8, value9]:
+            try:
+                numeric_values.append(float(value))
+            except (ValueError, TypeError):
+                # Если не удается преобразовать в float, оставляем значение как есть
+                numeric_values.append(value)
+
+        # Формирование строки с данными
+        data_str = f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        data_str += f"Solar Input 1: {numeric_values[0]}V\n"
+        data_str += f"Solar Input W: {numeric_values[1]}W\n"
+        data_str += f"Solar Input KwH: {numeric_values[2]}KwH\n"
+        data_str += f"Extern Input V: {numeric_values[3]}V\n"
+        data_str += f"BatV: {numeric_values[4]}\n"
+        data_str += f"Bat Charge 1: {numeric_values[5]}A\n"
+        data_str += f"Bat Charge W: {numeric_values[6]}W\n"
+        data_str += f"Bat Total KwH: {numeric_values[7]}KwH\n"
+        data_str += f"Bat Capacity: {numeric_values[8]}\n"
+
+        # Отправка красивого сообщения с смайлами
+        bot.send_message(message.chat.id, text="🌞 Состояние с контроллера 🌞\n\n" + data_str)
+
+    except Exception as e:
+        bot.send_message(message.chat.id, text=f"⚠️ Ошибка: {str(e)}")
+
 
 @bot.message_handler(commands=['help'])
 def help_command(message):
@@ -223,6 +304,7 @@ def help_command(message):
        📊 /getdata 20231010 - 20231011
        """
     bot.reply_to(message, help_text)
+
 
 @bot.message_handler(commands=['getdata'])
 def get_data(message):
@@ -273,6 +355,8 @@ def get_data(message):
             with open(file_path, 'rb') as file:
                 bot.send_document(message.chat.id, file)
     bot.reply_to(message, "Неверный формат запроса. Пожалуйста, проверьте и попробуйте снова. ⚠️")
+
+
 @bot.message_handler(commands=['condition'])
 def get_condition(message):
     try:
@@ -282,12 +366,14 @@ def get_condition(message):
 
         if temperature is not None and solar_radiation is not None:
             bot.reply_to(
-                message, f"🌡️ Текущие показания: Температура: {temperature}°C, Влажность: {humidity}%,  Солнечное излучение: {solar_radiation} W/m²"
+                message,
+                f"🌡️ Текущие показания: Температура: {temperature}°C, Влажность: {humidity}%,  Солнечное излучение: {solar_radiation} W/m²"
             )
         else:
             bot.reply_to(message, "Ошибка при чтении данных. Попробуйте позже. ⚠️")
     except Exception as e:
         bot.reply_to(message, f"Ошибка при чтении данных: {str(e)} ⚠️")
+
 
 @bot.message_handler(commands=['status'])
 def get_status(message):
@@ -300,18 +386,22 @@ def get_status(message):
         status_message += "\nДанные ещё не отправлялись на почту."
 
     if (
-        last_high_temperature_notification_sent
-        and datetime.now() - last_high_temperature_notification_sent < timedelta(hours=NOTIFICATION_CONFIG['notification_interval_hours'])
+            last_high_temperature_notification_sent
+            and datetime.now() - last_high_temperature_notification_sent < timedelta(
+        hours=NOTIFICATION_CONFIG['notification_interval_hours'])
     ):
         status_message += f"\nПоследнее уведомление о высокой температуре было отправлено {last_high_temperature_notification_sent}."
 
     if (
-        last_low_temperature_notification_sent
-        and datetime.now() - last_low_temperature_notification_sent < timedelta(hours=NOTIFICATION_CONFIG['notification_interval_hours'])
+            last_low_temperature_notification_sent
+            and datetime.now() - last_low_temperature_notification_sent < timedelta(
+        hours=NOTIFICATION_CONFIG['notification_interval_hours'])
     ):
         status_message += f"\nПоследнее уведомление о низкой температуре было отправлено {last_low_temperature_notification_sent}."
 
     bot.reply_to(message, status_message)
+
+
 @bot.message_handler(commands=['ip'])
 def get_ip_command(message):
     if message.from_user.id in ALLOWED_USERS:
@@ -319,6 +409,8 @@ def get_ip_command(message):
         bot.reply_to(message, f"Текущий IP-адрес: {ip_address} 🌐")
     else:
         bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
+
+
 @bot.message_handler(commands=['openvpn'])
 def run_openvpn_command(message):
     if message.from_user.id in ALLOWED_USERS:
@@ -327,19 +419,25 @@ def run_openvpn_command(message):
     else:
         bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
 
+
 @bot.message_handler(commands=['vnc'])
 def run_vnc_command(message):
     if message.from_user.id in ALLOWED_USERS:
         threading.Thread(target=run_realvnc_and_send_ip, args=(message,)).start()
     else:
         bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
+
+
 @bot.message_handler(commands=['restartpi'])
 def restart_raspberry_pi(message):
     if message.from_user.id in ALLOWED_USERS:
         os.system("sudo reboot")
         bot.reply_to(message, "Перезапуск Raspberry Pi запущен. Пожалуйста, подождите...")
     else:
-        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды. Только администраторы могут перезапустить Raspberry Pi.")
+        bot.reply_to(message,
+                     "У вас нет разрешения на выполнение этой команды. Только администраторы могут перезапустить Raspberry Pi.")
+
+
 @bot.message_handler(commands=['downloadlog'])
 def download_log(message):
     try:
@@ -352,6 +450,8 @@ def download_log(message):
             bot.reply_to(message, "Файл лога не найден.")
     except Exception as e:
         bot.reply_to(message, f"Ошибка при скачивании лога: {str(e)}")
+
+
 def run_realvnc_and_send_ip(message):
     try:
         command = REALVNC_CONFIG['command']
@@ -387,10 +487,13 @@ def run_realvnc_and_send_ip(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"Ошибка при запуске RealVNC Server: {e}")
         logging.error(f"Ошибка при запуске RealVNC Server: {e}")
+
+
 def run_realvnc():
     try:
         command = REALVNC_CONFIG['command']
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   universal_newlines=True)
 
         # Ждем, пока RealVNC Server выдаст IP-адрес и порт
         ip_address = None
@@ -409,6 +512,7 @@ def run_realvnc():
     except Exception as e:
         logging.error(f"Ошибка при запуске RealVNC Server: {e}")
 
+
 def run_openvpn():
     try:
         command = OPENVPN_CONFIG['command']
@@ -423,6 +527,8 @@ def run_openvpn():
             logging.error(f"Ошибка при запуске OpenVPN. Ошибка: {output}")
     except Exception as e:
         logging.error(f"Ошибка при запуске OpenVPN: {e}")
+
+
 def get_current_ip():
     try:
         response = requests.get("http://ipinfo.io/ip")
@@ -433,6 +539,7 @@ def get_current_ip():
     except Exception as e:
         return f"Error: {str(e)}"
 
+
 def run_bot():
     while True:
         try:
@@ -441,6 +548,8 @@ def run_bot():
             logging.error(f"Ошибка с Telegram ботом: {e}")
             time.sleep(10)
 
+
 if __name__ == "__main__":
     threading.Thread(target=main, args=(SENSOR_TH_CONFIG['delay'],)).start()
     threading.Thread(target=run_bot).start()
+

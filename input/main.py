@@ -42,8 +42,30 @@ def create_solar_data_table():
 
     conn.commit()
     conn.close()
+def create_additional_table():
+    conn = sqlite3.connect(DATABASE_PATH)
+    c = conn.cursor()
 
-def insert_solar_data(city_id, datetime, temperature, humidity, solar_radiation):
+    c.execute('''CREATE TABLE IF NOT EXISTS additional_data (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     unique_id INTEGER NOT NULL,
+                     datetime DATETIME NOT NULL,
+                     solar_input_1 TEXT,
+                     solar_input_w TEXT,
+                     solar_input_kwh TEXT,
+                     extern_input_v TEXT,
+                     batv TEXT,
+                     bat_charge_1 TEXT,
+                     bat_charge_w TEXT,
+                     bat_total_kwh TEXT,
+                     bat_capacity TEXT,
+                     FOREIGN KEY (unique_id) REFERENCES weathergis(unique_id)
+                 )''')
+
+    conn.commit()
+    conn.close()
+
+def insert_solar_data(city_id, datetime, temperature, humidity, solar_radiation, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity):
     conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
 
@@ -51,12 +73,19 @@ def insert_solar_data(city_id, datetime, temperature, humidity, solar_radiation)
     original_unique_id = f"{city_id}{datetime}"
     compact_unique_id = original_unique_id.replace(" ", "").replace("-", "").replace(":", "")
 
+    # Вставка данных в основную таблицу
     c.execute(
         "INSERT OR IGNORE INTO weathergis (unique_id, city_id, datetime, temperature, humidity, solar_radiation) VALUES (?, ?, ?, ?, ?, ?)",
         (compact_unique_id, city_id, datetime, temperature, humidity, solar_radiation))
 
+    # Вставка данных в дополнительную таблицу
+    c.execute(
+        "INSERT OR IGNORE INTO additional_data (unique_id, datetime, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (compact_unique_id, datetime, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity))
+
     conn.commit()
     conn.close()
+
 
 def download_all_attachments():
     print("Попытка загрузить вложения...")
@@ -95,12 +124,29 @@ def download_all_attachments():
                 # Читаем данные из файла и вставляем их в базу данных
                 with open(file_path, 'r') as csv_file:
                     csv_reader = csv.reader(csv_file)
-                    for row in csv_reader:
-                        if len(row) < 4:
-                            print(f"Пропущена строка CSV из-за недостаточного количества столбцов: {row}")
-                            continue
 
+                    # Если заголовка нет, создайте заголовок со старыми полями
+                    header = next(csv_reader, None)
+                    if not header:
+                        header = ["datetime", "temperature", "humidity", "solar_radiation"]
+
+                    for row in csv_reader:
                         datetime = row[0]
+
+                        # Если есть новые поля в файле, используйте их значения
+                        if len(row) >= 13:
+                            solar_input_1 = row[4]
+                            solar_input_w = row[5]
+                            solar_input_kwh = row[6]
+                            extern_input_v = row[7]
+                            batv = row[8]
+                            bat_charge_1 = row[9]
+                            bat_charge_w = row[10]
+                            bat_total_kwh = row[11]
+                            bat_capacity = row[12]
+                        else:
+                            # Если нет новых полей, оставьте их значения пустыми
+                            solar_input_1 = solar_input_w = solar_input_kwh = extern_input_v = batv = bat_charge_1 = bat_charge_w = bat_total_kwh = bat_capacity = ""
 
                         try:
                             temperature = float(row[1])
@@ -111,7 +157,12 @@ def download_all_attachments():
                             continue
 
                         insert_solar_data(city_id=4853, datetime=datetime, temperature=temperature, humidity=humidity,
-                                          solar_radiation=solar_radiation)
+                                          solar_radiation=solar_radiation, solar_input_1=solar_input_1,
+                                          solar_input_w=solar_input_w,
+                                          solar_input_kwh=solar_input_kwh, extern_input_v=extern_input_v, batv=batv,
+                                          bat_charge_1=bat_charge_1, bat_charge_w=bat_charge_w,
+                                          bat_total_kwh=bat_total_kwh,
+                                          bat_capacity=bat_capacity)
 
     # Закрытие соединения с почтовым сервером
     mail.logout()
@@ -144,10 +195,78 @@ def create_graphs():
     fig3.update_xaxes(title_text='Дата')
     fig3.update_yaxes(title_text='Влажность (%)')
 
+    # Здесь создайте графики для новой таблицы additional_data
+    cursor.execute(
+        "SELECT datetime, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity FROM additional_data")
+    rows_additional = cursor.fetchall()
+
+    # Разделение данных на списки
+    (
+        dates_additional,
+        solar_input_1,
+        solar_input_w,
+        solar_input_kwh,
+        extern_input_v,
+        batv,
+        bat_charge_1,
+        bat_charge_w,
+        bat_total_kwh,
+        bat_capacity,
+    ) = zip(*rows_additional)
+
+    # Создание графика для Solar Input 1 (Scatter с линиями)
+    fig4 = px.scatter(x=dates_additional, y=solar_input_1, title='Solar Input 1 (additional_data)',
+                      labels={'x': 'Дата', 'y': 'Solar Input 1'})
+    fig4.update_xaxes(title_text='Дата')
+    fig4.update_yaxes(title_text='Solar Input 1')
+
+    # Создание графика для Solar Input W (круговая диаграмма)
+    fig5 = px.pie(names=dates_additional, values=solar_input_w, title='Solar Input W (additional_data)')
+
+    # Создание графика для Solar Input KwH (Scatter с линиями)
+    fig6 = px.scatter(x=dates_additional, y=solar_input_kwh, title='Solar Input KwH (additional_data)',
+                      labels={'x': 'Дата', 'y': 'Solar Input KwH'})
+    fig6.update_xaxes(title_text='Дата')
+    fig6.update_yaxes(title_text='Solar Input KwH')
+
+    # Создание графика для Extern Input V (Гистограмма)
+    fig7 = px.histogram(x=dates_additional, y=extern_input_v, title='Extern Input V (additional_data)',
+                        labels={'x': 'Дата', 'y': 'Extern Input V'}, nbins=20)
+    fig7.update_xaxes(title_text='Дата')
+    fig7.update_yaxes(title_text='Extern Input V')
+
+    # Создание графика для BatV (Scatter с линиями)
+    fig8 = px.scatter(x=dates_additional, y=batv, title='BatV (additional_data)', labels={'x': 'Дата', 'y': 'BatV'})
+    fig8.update_xaxes(title_text='Дата')
+    fig8.update_yaxes(title_text='BatV')
+
+    # Создание графика для Bat Charge 1 (Линейный график)
+    fig9 = px.line(x=dates_additional, y=bat_charge_1, title='Bat Charge 1 (additional_data)',
+                   labels={'x': 'Дата', 'y': 'Bat Charge 1'})
+    fig9.update_xaxes(title_text='Дата')
+    fig9.update_yaxes(title_text='Bat Charge 1')
+
+    # Создание графика для Bat Charge W (Линейный график)
+    fig10 = px.line(x=dates_additional, y=bat_charge_w, title='Bat Charge W (additional_data)',
+                    labels={'x': 'Дата', 'y': 'Bat Charge W'})
+    fig10.update_xaxes(title_text='Дата')
+    fig10.update_yaxes(title_text='Bat Charge W')
+
+    # Создание графика для Bat Total KwH (Scatter 3D)
+    fig11 = px.scatter_3d(x=dates_additional, y=bat_total_kwh, z=[0] * len(bat_total_kwh),
+                          title='Bat Total KwH (additional_data)',
+                          labels={'x': 'Дата', 'y': 'Bat Total KwH', 'z': 'Dummy'})
+
+    # Создание графика для Bat Capacity (Scatter с линиями)
+    fig12 = px.scatter(x=dates_additional, y=bat_capacity, title='Bat Capacity (additional_data)',
+                       labels={'x': 'Дата', 'y': 'Bat Capacity'})
+    fig12.update_xaxes(title_text='Дата')
+    fig12.update_yaxes(title_text='Bat Capacity')
+
     # Закрытие соединения с базой данных
     conn.close()
 
-    return fig1, fig2, fig3
+    return fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12
 def main_process():
     while True:
         download_all_attachments()
@@ -157,12 +276,22 @@ def main_process():
 if __name__ == "__main__":
     #copy_database()  # Копировать базу данных
     #create_solar_data_table()  # Создать таблицу перед использованием
-    fig1, fig2, fig3 = create_graphs()  # Создать графики
+    #create_additional_table()
+    fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12 = create_graphs()  # Создать графики
     # Определите атрибут layout до запуска сервера
     app.layout = html.Div([
         dcc.Graph(figure=fig1),
         dcc.Graph(figure=fig2),
-        dcc.Graph(figure=fig3)
+        dcc.Graph(figure=fig3),
+        dcc.Graph(figure=fig4),
+        dcc.Graph(figure=fig5),
+        dcc.Graph(figure=fig6),
+        dcc.Graph(figure=fig7),
+        dcc.Graph(figure=fig8),
+        dcc.Graph(figure=fig9),
+        dcc.Graph(figure=fig10),
+        dcc.Graph(figure=fig11),
+        dcc.Graph(figure=fig12)
     ])
     threading.Thread(target=app.run_server).start()
     threading.Thread(target=main_process()).start()
