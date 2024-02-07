@@ -7,20 +7,23 @@ import sqlite3
 import csv
 import dash
 import plotly.express as px
+import threading
+import concurrent.futures
+import telebot
+import datetime
 from dash import dcc, html
 import shutil
-from config import IMAP_CONFIG, DOWNLOAD_PATH
-from multiprocessing import Process
-import threading
+from config import IMAP_CONFIG, DOWNLOAD_PATH, TELEGRAM_CONFIG, ALLOWED_USERS
+from telebot import types
 # Путь к базе данных SQLite
 DATABASE_PATH = os.path.join(os.getcwd(), "solar_data.db")
 DATABASE_PATH_dash = os.path.join(os.getcwd(), "solar_data_dash.db")
-# Установка соединения с базой данных SQLite
-#conn = sqlite3.connect('solar_data.db')
-#cursor = conn.cursor()
-
+# Инициализация бота
+bot = telebot.TeleBot(TELEGRAM_CONFIG['TOKEN'])
 # Создание экземпляра Dash приложения
 app = dash.Dash(__name__)
+# Глобальная переменная для счетчика попыток
+attempt_count = 0
 def copy_database():
     original_db_path = 'solar_data.db'
     backup_db_path = 'solar_data_dash.db'
@@ -89,11 +92,25 @@ def insert_solar_data(city_id, datetime, temperature, humidity, solar_radiation,
 
 def download_all_attachments():
     print("Попытка загрузить вложения...")
+    global attempt_count  # Объявляем, что используем глобальную переменную
+    print("Попытка загрузить вложения...")
+    max_attempts = 2  # Максимальное количество попыток
+    success = attempt_download()
+    if success:
+        # Если успешно, сбрасываем счетчик и завершаем цикл
+        attempt_count = 0
+        # Если неудачно, увеличиваем счетчик
+    else:
+        attempt_count += 1
+        # Если файл не найден после двух попыток, уведомляем пользователей
+    if attempt_count >= max_attempts:
+        notify_users()
+def attempt_download():
     # Подключение к почтовому серверу
     mail = imaplib.IMAP4_SSL(IMAP_CONFIG['server'], IMAP_CONFIG['port'])
     mail.login(IMAP_CONFIG['login'], IMAP_CONFIG['password'])
     mail.select('inbox')
-
+    attempt_count = 0  # Счетчик попыток
     # Поиск всех непрочитанных писем от gisknastu@yandex.ru
     result, email_ids = mail.search(None, '(UNSEEN FROM "gisknastu@yandex.ru")')
     if result != "OK":
@@ -166,14 +183,12 @@ def download_all_attachments():
 
     # Закрытие соединения с почтовым сервером
     mail.logout()
-
+    return true
 def create_graphs():
     # Установка соединения с базой данных SQLite
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
 
-    # Здесь создайте графики fig1, fig2 и fig3 с использованием данных из базы данных
-    # Пример:
     cursor.execute("SELECT datetime, temperature, humidity, solar_radiation FROM weathergis")
     rows = cursor.fetchall()
 
@@ -194,8 +209,9 @@ def create_graphs():
     fig3 = px.line(x=dates, y=humidities, title='Влажность')
     fig3.update_xaxes(title_text='Дата')
     fig3.update_yaxes(title_text='Влажность (%)')
-
-    # Здесь создайте графики для новой таблицы additional_data
+    #закоментированные графики для новой таблицы ПОКА ЧТО ТЕСТОВЫЕ
+    """
+    # графики для новой таблицы additional_data
     cursor.execute(
         "SELECT datetime, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity FROM additional_data")
     rows_additional = cursor.fetchall()
@@ -262,36 +278,100 @@ def create_graphs():
                        labels={'x': 'Дата', 'y': 'Bat Capacity'})
     fig12.update_xaxes(title_text='Дата')
     fig12.update_yaxes(title_text='Bat Capacity')
-
+"""
     # Закрытие соединения с базой данных
     conn.close()
+    return fig1, fig2, fig3
+    #return fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12
+def notify_users():
+    for user_id in ALLOWED_USERS:
+        bot.send_message(user_id, "Ошибка: файл почты не найден после неудачной попытки в течение часа.")
 
-    return fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12
+@bot.message_handler(commands=['start'])
+def start(message):
+    markup = types.InlineKeyboardMarkup()
+    get_data_button = types.InlineKeyboardButton(text="📊 Получить данные БД", callback_data='getdataBD')
+    status_button = types.InlineKeyboardButton(text="📈 Статус системы", callback_data='status')
+
+    markup.row( get_data_button, status_button)
+    bot.send_message(message.chat.id, "Привет! Я ваш датчиковый бот. Выберите действие:", reply_markup=markup)
+
+# Добавим обработчик для кнопок
+@bot.callback_query_handler(func=lambda call: True)
+def handle_query(call):
+    command = call.data
+
+    # Теперь проверяем значение callback_data
+    if command == 'condition':
+        # Отправляем сообщение с командой /condition
+        bot.send_message(call.message.chat.id, "/condition")
+    elif command == 'getdataBD':
+        # Отправляем сообщение с командой /getdataBD
+        bot.send_message(call.message.chat.id, "/getdataBD")
+    elif command == 'status':
+        # Отправляем сообщение с командой /status
+        bot.send_message(call.message.chat.id, "/status")
+    elif command == 'relay_st':
+        # Отправляем сообщение с командой /relay_st
+        bot.send_message(call.message.chat.id, "/relay_st")
+    elif command == 'relay_on':
+        # Отправляем сообщение с командой /relay_on
+        bot.send_message(call.message.chat.id, "/relay_on")
+    elif command == 'relay_off':
+        # Отправляем сообщение с командой /relay_off
+        bot.send_message(call.message.chat.id, "/relay_off")
+    elif command == 'ip':
+        # Отправляем сообщение с командой /ip
+        bot.send_message(call.message.chat.id, "/ip")
+
+@bot.message_handler(commands=['getdataBD'])
+def get_data(message):
+    database_path = 'solar_data.db'
+    if os.path.exists(database_path):
+        with open(database_path, 'rb') as db_file:
+            bot.send_document(message.chat.id, db_file)
+    else:
+        bot.reply_to(message,
+                     "Файл базы данных не найден. Пожалуйста, убедитесь, что файл 'solar_data.db' находится в корне программы.")
+
 def main_process():
     while True:
         download_all_attachments()
         print("Ожидание следующей проверки...")
         time.sleep(3600)  # Пауза в 1 час (3600 секунд)
-
+def run_bot():
+    while True:
+        try:
+            bot.polling(none_stop=True)
+        except Exception as e:
+            print("ошибка с ботом")
+            import traceback
+            traceback.print_exc()
+            time.sleep(10)
+def start_dash_server():
+    app.run_server(debug=False, use_reloader=False)
 if __name__ == "__main__":
     #copy_database()  # Копировать базу данных
     #create_solar_data_table()  # Создать таблицу перед использованием
     #create_additional_table()
-    fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12 = create_graphs()  # Создать графики
-    # Определите атрибут layout до запуска сервера
+        #fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12 = create_graphs()
+    fig1, fig2, fig3 = create_graphs()
+    # атрибуты layout до запуска сервера
     app.layout = html.Div([
         dcc.Graph(figure=fig1),
         dcc.Graph(figure=fig2),
-        dcc.Graph(figure=fig3),
-        dcc.Graph(figure=fig4),
-        dcc.Graph(figure=fig5),
-        dcc.Graph(figure=fig6),
-        dcc.Graph(figure=fig7),
-        dcc.Graph(figure=fig8),
-        dcc.Graph(figure=fig9),
-        dcc.Graph(figure=fig10),
-        dcc.Graph(figure=fig11),
-        dcc.Graph(figure=fig12)
+        dcc.Graph(figure=fig3)
+    #    dcc.Graph(figure=fig4),
+    #    dcc.Graph(figure=fig5),
+    #    dcc.Graph(figure=fig6),
+    #    dcc.Graph(figure=fig7),
+    #    dcc.Graph(figure=fig8),
+    #    dcc.Graph(figure=fig9),
+    #    dcc.Graph(figure=fig10),
+    #    dcc.Graph(figure=fig11),
+    #    dcc.Graph(figure=fig12)
     ])
-    threading.Thread(target=app.run_server).start()
-    threading.Thread(target=main_process()).start()
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        executor.submit(start_dash_server)
+        executor.submit(main_process)
+        executor.submit(run_bot)

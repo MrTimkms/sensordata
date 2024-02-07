@@ -16,10 +16,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from configurate import SENSOR_TH_CONFIG, SENSOR_PYRANOMETER_CONFIG, Mail_CONFIG, DATA_PATH_Conf, TELEGRAM_CONFIG, \
-    ALLOWED_USERS, OPENVPN_CONFIG, REALVNC_CONFIG, NOTIFICATION_CONFIG
+    ALLOWED_USERS, OPENVPN_CONFIG, REALVNC_CONFIG, NOTIFICATION_CONFIG, RELAY_CONFIG
 from datetime import datetime, timedelta
 from telebot import types
 from clicker import run_clicker
+from threading import Thread
 
 # Настройка логирования
 logging.basicConfig(filename='program_log.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -94,6 +95,26 @@ def send_email(subject, body, attachment_path):
 
 sensorTH = configure_sensor(SENSOR_TH_CONFIG)
 pyranometer = configure_sensor(SENSOR_PYRANOMETER_CONFIG)
+relay = configure_sensor(RELAY_CONFIG)
+
+
+# Функция подключения нагрузки
+def load(freq):
+    channel_number = RELAY_CONFIG['channel']  # Номер канала релейного модуля
+    work_time = (freq * RELAY_CONFIG['fill_factor'] / 100)
+    sleep_time = freq - work_time
+
+    while True:
+        try:
+            relay.write_register(int(channel_number), 256, 0, 6)  # Открываем канал релейного модуля
+            time.sleep(int(work_time))
+            relay.write_register(int(channel_number), 512, 0, 6)  # Закрываем канал релейного модуля
+            time.sleep(int(sleep_time))
+            relay.clear_buffers_before_each_transaction = True
+        except Exception as e:
+            print(f"Ошибка работы релейного модуля: {str(e)}")
+        finally:
+            relay.clear_buffers_before_each_transaction = True
 
 
 # Функция для сбора данных с датчиков температуры
@@ -109,7 +130,7 @@ def collect_sensor_data(sensor, sensor_name):
 
 def convert_temperature(temperature):
     # Преобразование 16-битного числа в знаковое целое
-    signed_int_value = (temperature - 6554) if temperature >= 3276 else temperature
+    signed_int_value = (temperature - 6553.6) if temperature >= 3276.8 else temperature
     return signed_int_value
 
 
@@ -174,25 +195,25 @@ def main(sensor_delay):
             if temperature is not None and solar_radiation is not None:
                 logging.info(
                     f"Текущий час: {current_hour}, Температура: {temperature}°C, Влажность: {humidity}%, Солнечное излучение: {solar_radiation} W/m²")
-
-                result_from_second_program = run_clicker()
-
                 # Разбор и сохранение значений
-                value1, value2, value3, value4, value5, value6, value7, value8, value9 = result_from_second_program
-                numeric_values = []
+                result_from_second_program = run_clicker()
+                numeric_keys = ["Solar Input V", "Solar Input I", "Solar Input W", "Solar Input KwH", "Extern Input V",
+                                "Wind Average DC V", "Wind Average DC I", "Wind Input DC W", "Wind Input KwH",
+                                "Motor Rev", "Wind Run Status", "BatV", "Bat Charge I", "Bat Charge W", "Bat Total KwH",
+                                "Bat Capacity"]
 
-                for value in [value1, value2, value3, value4, value5, value6, value7, value8, value9]:
-                    try:
-                        numeric_values.append(float(value))
-                    except (ValueError, TypeError):
-                        # Если не удается преобразовать в float, оставляем значение как есть
-                        numeric_values.append(value)
+                numeric_values = [result_from_second_program.get(key, None) for key in numeric_keys]
+
                 csv_filename = datetime.now().strftime("%Y%m%d_%H.csv")
                 csv_file_path = os.path.join(DATA_PATH, csv_filename)
                 # Добавление заголовков в данные для CSV файла
-                headers = ["Timestamp", "Temperature", "Humidity", "Solar Radiation", "Solar Input 1", "Solar Input W",
-                           "Solar Input KwH", "Extern Input V", "BatV", "Bat Charge 1", "Bat Charge W", "Bat Total KwH",
-                           "Bat Capacity"]
+                headers = [
+                    "Timestamp", "Temperature °C", "Humidity %", "Solar Radiation W/m²",
+                    "Solar Input V", "Solar Input I", "Solar Input W", "Solar Input KwH",
+                    "Extern Input V", "Wind Average DC V", "Wind Average DC I", "Wind Input DC W",
+                    "Wind Input KwH", "Motor Rev", "Wind Run Status", "BatV", "Bat Charge I",
+                    "Bat Charge W", "Bat Total KwH", "Bat Capacity"
+                ]
                 # Проверяем, существует ли файл
                 file_exists = os.path.isfile(csv_file_path)
                 if not file_exists:
@@ -202,11 +223,10 @@ def main(sensor_delay):
                         writer.writerow(headers)
                 data_to_save = [timestamp, temperature, humidity, solar_radiation] + numeric_values
 
-
                 save_data_to_csv(data_to_save, csv_file_path)
 
                 if last_sent_hour is None:
-                    last_sent_hour = current_hour  # Установите текущий час как последний, чтобы данные отправились в начале следующего часа
+                    last_sent_hour = current_hour 
                 elif current_hour != last_sent_hour:
                     if last_csv_file_path is not None:
                         # Отправляем данные из файла предыдущего часа
@@ -240,46 +260,72 @@ bot = telebot.TeleBot(TELEGRAM_CONFIG['token'])
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    #condition_button = types.KeyboardButton("🌡️ Показания датчиков")
-    #data_button = types.KeyboardButton("📊 Получить данные")
-    #status_button = types.KeyboardButton("📈 Статус системы")
-    #openvpn_button = types.KeyboardButton("🔒 Запустить VPN")
-    #vnc_button = types.KeyboardButton("🖥️ Запустить VNC")
-    #ip_button = types.KeyboardButton("🌐 Получить IP")
+    markup = types.InlineKeyboardMarkup()
+    condition_button = types.InlineKeyboardButton(text="🌡️ Показания датчиков", callback_data='condition')
+    get_data_button = types.InlineKeyboardButton(text="📊 Получить данные", callback_data='getdata')
+    status_button = types.InlineKeyboardButton(text="📈 Статус системы", callback_data='status')
+    relay_status_button = types.InlineKeyboardButton(text="🖥️ Проверить реле", callback_data='relay_st')
+    lamp_on_button = types.InlineKeyboardButton(text="💡 Включить лампу (5 Вт)", callback_data='relay_on')
+    lamp_off_button = types.InlineKeyboardButton(text="🚫 Выключить лампу", callback_data='relay_off')
+    ip_button = types.InlineKeyboardButton(text="🌐 Получить IP", callback_data='ip')
 
-    #markup.row(condition_button, data_button, status_button)
-    #markup.row(openvpn_button, vnc_button, ip_button)
+    markup.row(condition_button, get_data_button, status_button)
+    markup.row(relay_status_button, lamp_on_button, lamp_off_button)
+    markup.row(ip_button)
 
     bot.send_message(message.chat.id, "Привет! Я ваш датчиковый бот. Выберите действие:", reply_markup=markup)
+
+
+# Добавим обработчик для кнопок
+@bot.callback_query_handler(func=lambda call: True)
+def handle_query(call):
+    command = call.data
+
+    # Теперь проверяем значение callback_data
+    if command == 'condition':
+        # Отправляем сообщение с командой /condition
+        bot.send_message(call.message.chat.id, "/condition")
+    elif command == 'getdata':
+        # Отправляем сообщение с командой /getdata
+        bot.send_message(call.message.chat.id, "/getdata")
+    elif command == 'status':
+        # Отправляем сообщение с командой /status
+        bot.send_message(call.message.chat.id, "/status")
+    elif command == 'relay_st':
+        # Отправляем сообщение с командой /relay_st
+        bot.send_message(call.message.chat.id, "/relay_st")
+    elif command == 'relay_on':
+        # Отправляем сообщение с командой /relay_on
+        bot.send_message(call.message.chat.id, "/relay_on")
+    elif command == 'relay_off':
+        # Отправляем сообщение с командой /relay_off
+        bot.send_message(call.message.chat.id, "/relay_off")
+    elif command == 'ip':
+        # Отправляем сообщение с командой /ip
+        bot.send_message(call.message.chat.id, "/ip")
 
 @bot.message_handler(commands=['contrinfo'])
 def contrinfo_command(message):
     try:
+        # Разбор и сохранение значений
         result_from_second_program = run_clicker()
 
-        # Разбор и сохранение значений
-        value1, value2, value3, value4, value5, value6, value7, value8, value9 = result_from_second_program
-        numeric_values = []
+        # Задать порядок ключей, который соответствует порядку в заголовках
+        keys_order = [
+            "Solar Input V", "Solar Input I", "Solar Input W", "Solar Input KwH",
+            "Extern Input V", "Wind Average DC V", "Wind Average DC I", "Wind Input DC W",
+            "Wind Input KwH", "Motor Rev", "Wind Run Status", "BatV",
+            "Bat Charge I", "Bat Charge W", "Bat Total KwH", "Bat Capacity"
+        ]
 
-        for value in [value1, value2, value3, value4, value5, value6, value7, value8, value9]:
-            try:
-                numeric_values.append(float(value))
-            except (ValueError, TypeError):
-                # Если не удается преобразовать в float, оставляем значение как есть
-                numeric_values.append(value)
-
-        # Формирование строки с данными
+        # Преобразование числовых значений и формирование строки с данными
         data_str = f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        data_str += f"Solar Input 1: {numeric_values[0]}V\n"
-        data_str += f"Solar Input W: {numeric_values[1]}W\n"
-        data_str += f"Solar Input KwH: {numeric_values[2]}KwH\n"
-        data_str += f"Extern Input V: {numeric_values[3]}V\n"
-        data_str += f"BatV: {numeric_values[4]}\n"
-        data_str += f"Bat Charge 1: {numeric_values[5]}A\n"
-        data_str += f"Bat Charge W: {numeric_values[6]}W\n"
-        data_str += f"Bat Total KwH: {numeric_values[7]}KwH\n"
-        data_str += f"Bat Capacity: {numeric_values[8]}\n"
+        for key in keys_order:
+            value = result_from_second_program[key]
+            if isinstance(value, (float, int)):
+                data_str += f"{key}: {value}\n"
+            else:
+                data_str += f"{key}: {value}\n"
 
         # Отправка красивого сообщения с смайлами
         bot.send_message(message.chat.id, text="🌞 Состояние с контроллера 🌞\n\n" + data_str)
@@ -287,17 +333,16 @@ def contrinfo_command(message):
     except Exception as e:
         bot.send_message(message.chat.id, text=f"⚠️ Ошибка: {str(e)}")
 
-
 @bot.message_handler(commands=['help'])
 def help_command(message):
     help_text = """
        🌡️ /condition - получить текущие показания датчиков
        📊 /getdata - получить данные в формате CSV
        📈 /status - проверить статус системы
-       🔒 /openvpn - запустить VPN
-       🖥️ /vnc - запустить VNC
+       🖥️ /relay_st - проверить статус реле
+       💡 /relay_on - включить реле (лампа 5 Вт) 
+       🚫 /relay_off - выключить реле (лампа 5 Вт)
        🌐 /ip - получить IP
-       🔄 /restartpi - перезапустить Raspberry Pi
 
        Примеры ввода дат:
        📊 /getdata 20231010
@@ -411,31 +456,37 @@ def get_ip_command(message):
         bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
 
 
-@bot.message_handler(commands=['openvpn'])
-def run_openvpn_command(message):
-    if message.from_user.id in ALLOWED_USERS:
-        threading.Thread(target=run_openvpn).start()
-        bot.reply_to(message, "Запущен процесс подключения к VPN. Ожидайте... 🔒")
-    else:
-        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
+@bot.message_handler(commands=['relay_st'])
+def relay_status(message):
+    channel_number = RELAY_CONFIG['channel']  # Номер канала релейного модуля
+    relay_state = relay.read_register(int(channel_number), 0)  # Читаем состояние канала релейного модуля
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    relay_status = (f"Relay channel {channel_number} is {'On' if relay_state == 1 else 'Off'} at {timestamp}")
+    bot.reply_to(message, relay_status)
 
 
-@bot.message_handler(commands=['vnc'])
-def run_vnc_command(message):
-    if message.from_user.id in ALLOWED_USERS:
-        threading.Thread(target=run_realvnc_and_send_ip, args=(message,)).start()
-    else:
-        bot.reply_to(message, "У вас нет разрешения на выполнение этой команды.")
+@bot.message_handler(commands=['relay_on'])
+def relay_on(message):
+    channel_number = RELAY_CONFIG['channel']  # Номер канала релейного модуля
+    relay.write_register(int(channel_number), 256, 0, 6)  # Открываем канал релейного модуля
+    time.sleep(1)
+    relay_state = relay.read_register(int(channel_number), 0)  # Читаем состояние канала релейного модуля
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    relay_status = (f"Relay channel {channel_number} is {'On' if relay_state == 1 else 'Off'} at {timestamp}")
+    relay.clear_buffers_before_each_transaction = True
+    bot.reply_to(message, relay_status)
 
 
-@bot.message_handler(commands=['restartpi'])
-def restart_raspberry_pi(message):
-    if message.from_user.id in ALLOWED_USERS:
-        os.system("sudo reboot")
-        bot.reply_to(message, "Перезапуск Raspberry Pi запущен. Пожалуйста, подождите...")
-    else:
-        bot.reply_to(message,
-                     "У вас нет разрешения на выполнение этой команды. Только администраторы могут перезапустить Raspberry Pi.")
+@bot.message_handler(commands=['relay_off'])
+def relay_off(message):
+    channel_number = RELAY_CONFIG['channel']  # Номер канала релейного модуля
+    relay.write_register(int(channel_number), 512, 0, 6)  # Закрываем канал релейного модуля
+    time.sleep(1)
+    relay_state = relay.read_register(int(channel_number), 0)  # Читаем состояние канала релейного модуля
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    relay_status = (f"Relay channel {channel_number} is {'On' if relay_state == 1 else 'Off'} at {timestamp}")
+    relay.clear_buffers_before_each_transaction = True
+    bot.reply_to(message, relay_status)
 
 
 @bot.message_handler(commands=['downloadlog'])
@@ -450,83 +501,6 @@ def download_log(message):
             bot.reply_to(message, "Файл лога не найден.")
     except Exception as e:
         bot.reply_to(message, f"Ошибка при скачивании лога: {str(e)}")
-
-
-def run_realvnc_and_send_ip(message):
-    try:
-        command = REALVNC_CONFIG['command']
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   universal_newlines=True)
-
-        # Заведем флаг для определения, был ли IP-адрес найден
-        ip_found = False
-
-        # Сюда будем записывать все выводы для отладки
-        full_output = ""
-
-        # Ждем, пока RealVNC Server выдаст IP-адрес и порт
-        for line in process.stdout:
-            # Записываем полный вывод для отладки
-            full_output += line
-
-            if "New desktop is" in line:
-                # Извлекаем IP-адрес и порт из строки
-                parts = line.strip().split()
-                if len(parts) >= 3:
-                    ip_address = parts[-1]
-                    ip_found = True
-                    break
-
-        if ip_found:
-            bot.send_message(message.chat.id, f"RealVNC Server запущен. IP-адрес и порт: {ip_address}")
-        else:
-            bot.send_message(message.chat.id, "Не удалось извлечь IP-адрес из RealVNC Server.")
-
-        # Записываем полный вывод в лог
-        logging.info("Полный вывод RealVNC Server:\n" + full_output)
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка при запуске RealVNC Server: {e}")
-        logging.error(f"Ошибка при запуске RealVNC Server: {e}")
-
-
-def run_realvnc():
-    try:
-        command = REALVNC_CONFIG['command']
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   universal_newlines=True)
-
-        # Ждем, пока RealVNC Server выдаст IP-адрес и порт
-        ip_address = None
-        for line in process.stdout:
-            if "New desktop is" in line:
-                # Извлекаем IP-адрес и порт из строки
-                parts = line.strip().split()
-                if len(parts) >= 3:
-                    ip_address = parts[-1]
-
-        if ip_address:
-            # Отправляем IP-адрес и порт в Telegram
-            bot.send_message(TELEGRAM_CONFIG['your_chat_id'], f"RealVNC Server запущен. IP-адрес и порт: {ip_address}")
-        else:
-            logging.error("Не удалось извлечь IP-адрес из RealVNC Server.")
-    except Exception as e:
-        logging.error(f"Ошибка при запуске RealVNC Server: {e}")
-
-
-def run_openvpn():
-    try:
-        command = OPENVPN_CONFIG['command']
-        process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   universal_newlines=True)
-
-        output, _ = process.communicate()
-
-        if process.returncode == 0:
-            logging.info("OpenVPN успешно запущен.")
-        else:
-            logging.error(f"Ошибка при запуске OpenVPN. Ошибка: {output}")
-    except Exception as e:
-        logging.error(f"Ошибка при запуске OpenVPN: {e}")
 
 
 def get_current_ip():
@@ -550,6 +524,9 @@ def run_bot():
 
 
 if __name__ == "__main__":
-    threading.Thread(target=main, args=(SENSOR_TH_CONFIG['delay'],)).start()
-    threading.Thread(target=run_bot).start()
-
+    t1 = Thread(target=main, args=(SENSOR_TH_CONFIG['delay'],))
+    t1.start()
+    t2 = Thread(target=run_bot)
+    t2.start()
+    t3 = Thread(target=load, args=(60,))
+    # t3.start()
