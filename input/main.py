@@ -10,11 +10,17 @@ import plotly.express as px
 import threading
 import concurrent.futures
 import telebot
-import datetime
 from dash import dcc, html
 import shutil
 from config import IMAP_CONFIG, DOWNLOAD_PATH, TELEGRAM_CONFIG, ALLOWED_USERS
 from telebot import types
+import logging
+# Отключение логирования Dash
+logging.getLogger('dash').setLevel(logging.ERROR)
+# Отключение логирования Dash и Flask
+logging.getLogger('dash').setLevel(logging.CRITICAL)
+logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
+from datetime import datetime
 # Путь к базе данных SQLite
 DATABASE_PATH = os.path.join(os.getcwd(), "solar_data.db")
 DATABASE_PATH_dash = os.path.join(os.getcwd(), "solar_data_dash.db")
@@ -93,8 +99,7 @@ def insert_solar_data(city_id, datetime, temperature, humidity, solar_radiation,
 def download_all_attachments():
     print("Попытка загрузить вложения...")
     global attempt_count  # Объявляем, что используем глобальную переменную
-    print("Попытка загрузить вложения...")
-    max_attempts = 2  # Максимальное количество попыток
+    max_attempts = 1  # Максимальное количество попыток
     success = attempt_download()
     if success:
         # Если успешно, сбрасываем счетчик и завершаем цикл
@@ -105,6 +110,7 @@ def download_all_attachments():
         # Если файл не найден после двух попыток, уведомляем пользователей
     if attempt_count >= max_attempts:
         notify_users()
+    return True
 def attempt_download():
     # Подключение к почтовому серверу
     mail = imaplib.IMAP4_SSL(IMAP_CONFIG['server'], IMAP_CONFIG['port'])
@@ -112,9 +118,11 @@ def attempt_download():
     mail.select('inbox')
     attempt_count = 0  # Счетчик попыток
     # Поиск всех непрочитанных писем от gisknastu@yandex.ru
-    result, email_ids = mail.search(None, '(UNSEEN FROM "gisknastu@yandex.ru")')
+    result, email_ids = mail.search(None, '(UNSEEN)')
+    from datetime import datetime
     if result != "OK":
         print("Ошибка при поиске писем.")
+        print(datetime.now().time())
         return
 
     for email_id in email_ids[0].split():
@@ -183,7 +191,7 @@ def attempt_download():
 
     # Закрытие соединения с почтовым сервером
     mail.logout()
-    return true
+    return True
 def create_graphs():
     # Установка соединения с базой данных SQLite
     conn = sqlite3.connect(DATABASE_PATH)
@@ -338,16 +346,24 @@ def main_process():
     while True:
         download_all_attachments()
         print("Ожидание следующей проверки...")
+        fig1, fig2, fig3 = create_graphs()  # Получить новые данные для графиков
+        app.layout.children = [
+            dcc.Graph(figure=fig1),
+            dcc.Graph(figure=fig2),
+            dcc.Graph(figure=fig3)
+        ]
         time.sleep(3600)  # Пауза в 1 час (3600 секунд)
+import time
+
 def run_bot():
     while True:
         try:
             bot.polling(none_stop=True)
         except Exception as e:
-            print("ошибка с ботом")
-            import traceback
-            traceback.print_exc()
-            time.sleep(10)
+            print(f"Произошла ошибка: {e}")
+            print("Перезапуск бота через 5 секунд...")
+            time.sleep(3600)  # Задержка перед перезапуском
+
 def start_dash_server():
     app.run_server(debug=False, use_reloader=False)
 if __name__ == "__main__":
