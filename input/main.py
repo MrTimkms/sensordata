@@ -7,6 +7,7 @@ import sqlite3
 import csv
 import dash
 import plotly.express as px
+import pandas as pd
 import threading
 import concurrent.futures
 import telebot
@@ -15,6 +16,12 @@ import shutil
 from config import IMAP_CONFIG, DOWNLOAD_PATH, TELEGRAM_CONFIG, ALLOWED_USERS
 from telebot import types
 import logging
+from dash.dash_table import DataTable
+from datetime import datetime, timedelta
+import dash_bootstrap_components as dbc
+from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
+from flask import send_file
 # Отключение логирования Dash
 logging.getLogger('dash').setLevel(logging.ERROR)
 # Отключение логирования Dash и Flask
@@ -22,32 +29,27 @@ logging.getLogger('dash').setLevel(logging.CRITICAL)
 logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
 from datetime import datetime
 # Путь к базе данных SQLite
-DATABASE_PATH = os.path.join(os.getcwd(), "solar_data.db")
-DATABASE_PATH_dash = os.path.join(os.getcwd(), "solar_data_dash.db")
+DATABASE_PATH = os.path.join(os.getcwd(), '1.3_SolarData_ExpU.db')
 # Инициализация бота
 bot = telebot.TeleBot(TELEGRAM_CONFIG['TOKEN'])
 # Создание экземпляра Dash приложения
-app = dash.Dash(__name__)
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 # Глобальная переменная для счетчика попыток
 attempt_count = 0
-def copy_database():
-    original_db_path = 'solar_data.db'
-    backup_db_path = 'solar_data_dash.db'
-    shutil.copy(original_db_path, backup_db_path)
-
 def create_solar_data_table():
     conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
 
     # Создание таблицы weathergis
-    c.execute('''CREATE TABLE IF NOT EXISTS weathergis (
-                    unique_id INTEGER PRIMARY KEY NOT NULL,
-                    city_id INTEGER NOT NULL,
-                    datetime DATETIME NOT NULL,
-                    temperature REAL NOT NULL,
-                    humidity REAL NOT NULL,
-                    solar_radiation REAL NOT NULL
-                )''')
+    c.execute('''CREATE TABLE "weathergis" (
+                "unique_id"	INTEGER NOT NULL,
+                "city_id"	INTEGER NOT NULL,
+                "datetime"	DATETIME NOT NULL,
+                "temperature"	REAL NOT NULL,
+                "humidity"	REAL NOT NULL,
+                "solar_radiation"	REAL NOT NULL,
+                PRIMARY KEY("unique_id")
+            );''')
 
     conn.commit()
     conn.close()
@@ -55,21 +57,22 @@ def create_additional_table():
     conn = sqlite3.connect(DATABASE_PATH)
     c = conn.cursor()
 
-    c.execute('''CREATE TABLE IF NOT EXISTS additional_data (
-                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     unique_id INTEGER NOT NULL,
-                     datetime DATETIME NOT NULL,
-                     solar_input_1 TEXT,
-                     solar_input_w TEXT,
-                     solar_input_kwh TEXT,
-                     extern_input_v TEXT,
-                     batv TEXT,
-                     bat_charge_1 TEXT,
-                     bat_charge_w TEXT,
-                     bat_total_kwh TEXT,
-                     bat_capacity TEXT,
-                     FOREIGN KEY (unique_id) REFERENCES weathergis(unique_id)
-                 )''')
+    c.execute('''CREATE TABLE "additional_data" (
+                    "id"	INTEGER,
+                    "unique_id"	INTEGER NOT NULL,
+                    "datetime"	DATETIME NOT NULL,
+                    "solar_input_I"	TEXT,
+                    "solar_input_W"	TEXT,
+                    "solar_input_kWh"	TEXT,
+                    "extern_input_V"	TEXT,
+                    "bat_charge_V"	TEXT,
+                    "bat_charge_I"	TEXT,
+                    "bat_charge_W"	TEXT,
+                    "bat_total_kWh"	TEXT,
+                    "bat_capacity"	TEXT,
+                    PRIMARY KEY("id" AUTOINCREMENT),
+                    FOREIGN KEY("unique_id") REFERENCES "weathergis"("unique_id")
+                );''')
 
     conn.commit()
     conn.close()
@@ -89,7 +92,7 @@ def insert_solar_data(city_id, datetime, temperature, humidity, solar_radiation,
 
     # Вставка данных в дополнительную таблицу
     c.execute(
-        "INSERT OR IGNORE INTO additional_data (unique_id, datetime, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO additional_data (unique_id, datetime, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (compact_unique_id, datetime, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity))
 
     conn.commit()
@@ -217,6 +220,7 @@ def create_graphs():
     fig3 = px.line(x=dates, y=humidities, title='Влажность')
     fig3.update_xaxes(title_text='Дата')
     fig3.update_yaxes(title_text='Влажность (%)')
+
     #закоментированные графики для новой таблицы ПОКА ЧТО ТЕСТОВЫЕ
     """
     # графики для новой таблицы additional_data
@@ -334,13 +338,55 @@ def handle_query(call):
 
 @bot.message_handler(commands=['getdataBD'])
 def get_data(message):
-    database_path = 'solar_data.db'
+    database_path = '1.3_SolarData_ExpU.db'
     if os.path.exists(database_path):
         with open(database_path, 'rb') as db_file:
             bot.send_document(message.chat.id, db_file)
     else:
         bot.reply_to(message,
                      "Файл базы данных не найден. Пожалуйста, убедитесь, что файл 'solar_data.db' находится в корне программы.")
+
+
+# Функция для создания таблицы данных
+def create_data_table():
+    # Установка соединения с базой данных SQLite
+    conn = sqlite3.connect(DATABASE_PATH)
+
+    # Выбор данных из таблицы weathergis за последние сутки
+    current_time = datetime.now()
+    one_day_ago = current_time - timedelta(days=1)
+    query = f"""
+            SELECT datetime, temperature, humidity, solar_radiation 
+            FROM weathergis 
+            WHERE datetime >= strftime('%Y-%m-%d %H:%M:%S', '{one_day_ago.strftime('%Y-%m-%d %H:%M:%S')}')
+        """
+    df = pd.read_sql_query(query, conn)
+
+    # Закрытие соединения с базой данных
+    conn.close()
+
+    # Создание таблицы на дашборде
+    table = DataTable(
+        id='solar-data-table',
+        columns=[{"name": i, "id": i} for i in df.columns],
+        data=df.to_dict('records'),
+        filter_action="native",  # Включаем фильтры по умолчанию
+        sort_action="native",  # Включаем сортировку по умолчанию
+        style_cell={
+            'textAlign': 'left',
+            'color': 'black',  # Устанавливаем черный цвет текста
+        },
+        style_header={
+            'backgroundColor': 'rgb(235,240,248)',  # Фон заголовка таблицы
+            'color': 'rgb(146,154,250)',  # Цвет текста заголовка таблицы
+            'fontWeight': 'bold',  # Жирный шрифт для заголовка
+        },
+        style_data={
+            'backgroundColor': 'rgb(255, 255, 255)',  # Белый фон для данных
+        },
+    )
+
+    return table
 
 def main_process():
     while True:
@@ -350,7 +396,8 @@ def main_process():
         app.layout.children = [
             dcc.Graph(figure=fig1),
             dcc.Graph(figure=fig2),
-            dcc.Graph(figure=fig3)
+            dcc.Graph(figure=fig3),
+            dcc.Graph(figure=table)
         ]
         time.sleep(3600)  # Пауза в 1 час (3600 секунд)
 import time
@@ -361,22 +408,74 @@ def run_bot():
             bot.polling(none_stop=True)
         except Exception as e:
             print(f"Произошла ошибка: {e}")
-            print("Перезапуск бота через 5 секунд...")
+            print("Перезапуск бота через 3600 секунд...")
+            print(datetime.now())
             time.sleep(3600)  # Задержка перед перезапуском
+# Колбэк для переключения видимости таблицы
+@app.callback(
+    Output('table-container', 'style'),
+    [Input('toggle-table', 'n_clicks')]
+)
+def toggle_table(n_clicks):
+    if n_clicks is None:
+        return {'display': 'none'}
+    if n_clicks % 2 == 1:
+        return {'display': 'block'}  # Показываем таблицу
+    else:
+        return {'display': 'none'}  # Скрываем таблицу
 
+# Колбэк для обработки нажатия кнопки "Скачать БД"
+@app.callback(
+    Output("download-data", "data"),
+    [Input("download-db-button", "n_clicks")],
+    prevent_initial_call=True,
+)
+def func(n_clicks):
+    if n_clicks is not None:
+        return {
+            "content": None,
+            "filename": "1.3_SolarData_ExpU.db"
+        }
+    raise dash.exceptions.PreventUpdate
+def download_callback(n_clicks):
+    if n_clicks is None:
+        raise dash.exceptions.PreventUpdate
+    else:
+        return dcc.send_file(DATABASE_PATH)
 def start_dash_server():
     app.run_server(debug=False, use_reloader=False)
 if __name__ == "__main__":
-    #copy_database()  # Копировать базу данных
-    #create_solar_data_table()  # Создать таблицу перед использованием
-    #create_additional_table()
-        #fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12 = create_graphs()
+
+    #fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12 = create_graphs()
     fig1, fig2, fig3 = create_graphs()
+    # Получение таблицы данных
+    table = create_data_table()
     # атрибуты layout до запуска сервера
     app.layout = html.Div([
+        html.H1(children='Дашборд по солнечной радиации и погоде'),
+        html.A("Скачать БД", id="download-db-link", href="/download/1.3_SolarData_ExpU.db", target="_blank"),
+        dcc.Download(id="download-data"),
         dcc.Graph(figure=fig1),
         dcc.Graph(figure=fig2),
-        dcc.Graph(figure=fig3)
+        dcc.Graph(figure=fig3),
+        dbc.Button("Показать/скрыть данные таблицы", id="toggle-table", className="mb-3", color="primary"),
+        html.Div(
+            [
+                html.H2(children='Данные за последние сутки'),
+                table
+            ],
+            id='table-container',
+            style={'display': 'none'}  # Скрываем таблицу по умолчанию
+        )
+    ])
+
+
+    # Маршрут для скачивания БД
+    @app.server.route("/download/1.3_SolarData_ExpU.db")
+    def download_db():
+        return send_file(DATABASE_PATH, as_attachment=True, attachment_filename='1.3_SolarData_ExpU.db')
+
+
     #    dcc.Graph(figure=fig4),
     #    dcc.Graph(figure=fig5),
     #    dcc.Graph(figure=fig6),
@@ -386,7 +485,6 @@ if __name__ == "__main__":
     #    dcc.Graph(figure=fig10),
     #    dcc.Graph(figure=fig11),
     #    dcc.Graph(figure=fig12)
-    ])
     with concurrent.futures.ThreadPoolExecutor() as executor:
         executor.submit(start_dash_server)
         executor.submit(main_process)
