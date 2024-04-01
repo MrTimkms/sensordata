@@ -2,7 +2,6 @@ import imaplib
 import email
 import os
 import re
-import time
 import sqlite3
 import csv
 import dash
@@ -22,6 +21,7 @@ import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 from flask import send_file
+import time
 # Отключение логирования Dash
 logging.getLogger('dash').setLevel(logging.ERROR)
 # Отключение логирования Dash и Flask
@@ -387,30 +387,41 @@ def create_data_table():
     )
 
     return table
-
+def update_graphs(n):
+    return fig1, fig2, fig3, table
+app.layout = html.Div([
+    dcc.Graph(id='graph1'),
+    dcc.Graph(id='graph2'),
+    dcc.Graph(id='graph3'),
+    dcc.Graph(id='table')
+])
 def main_process():
     while True:
-        download_all_attachments()
-        print("Ожидание следующей проверки...")
-        fig1, fig2, fig3 = create_graphs()  # Получить новые данные для графиков
-        app.layout.children = [
-            dcc.Graph(figure=fig1),
-            dcc.Graph(figure=fig2),
-            dcc.Graph(figure=fig3),
-            dcc.Graph(figure=table)
-        ]
-        time.sleep(3600)  # Пауза в 1 час (3600 секунд)
-import time
-
+        try:
+            download_all_attachments()
+            print("Ожидание следующей проверки...")
+            fig1, fig2, fig3 = create_graphs()  # Получить новые данные для графиков
+            # Обновление графиков
+            app.callback([Output('graph1', 'figure'),
+                          Output('graph2', 'figure'),
+                          Output('graph3', 'figure'),
+                          Output('table', 'figure')],
+                         [Input('interval-component', 'n_intervals')])(update_graphs)
+            time.sleep(3600)
+        except Exception as e:
+            print(f"Произошла ошибка: {e}")
+            print("Перезапуск бота через 10 мин")
+            print(datetime.now())
+            time.sleep(60*10)
 def run_bot():
     while True:
         try:
             bot.polling(none_stop=True)
         except Exception as e:
             print(f"Произошла ошибка: {e}")
-            print("Перезапуск бота через 3600 секунд...")
+            print("Перезапуск бота через 10 мин")
             print(datetime.now())
-            time.sleep(3600)  # Задержка перед перезапуском
+            time.sleep(60*10)
 # Колбэк для переключения видимости таблицы
 @app.callback(
     Output('table-container', 'style'),
@@ -468,14 +479,10 @@ if __name__ == "__main__":
             style={'display': 'none'}  # Скрываем таблицу по умолчанию
         )
     ])
-
-
     # Маршрут для скачивания БД
     @app.server.route("/download/1.3_SolarData_ExpU.db")
     def download_db():
         return send_file(DATABASE_PATH, as_attachment=True, attachment_filename='1.3_SolarData_ExpU.db')
-
-
     #    dcc.Graph(figure=fig4),
     #    dcc.Graph(figure=fig5),
     #    dcc.Graph(figure=fig6),
