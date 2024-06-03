@@ -25,8 +25,8 @@ SENSOR_PYRANOMETER_CONFIG = {
 Mail_CONFIG = {
     'smtp_server': 'smtp.yandex.ru',                # сервер почты
     'smtp_port': '465',                             # порт, используем ssl
-    'login': '[ваша почта]',                 # почта
-    'password': '[ваш пароль]'                  # пароль       
+    'login': 'gisknastu@yandex.ru',                 # почта
+    'password': 'lbehqvlictarghue'                  # пароль
 }
 
 DATA_PATH_Conf = {
@@ -36,7 +36,7 @@ TELEGRAM_CONFIG = {
     'TOKEN': '[ваш токен]'
 }
 
-ALLOWED_USERS = [123456789, 987654321]  # Замените на реальные ID пользователей
+ALLOWED_USERS = [123456789, 987654321]  # ID пользователей
 OPENVPN_CONFIG = {
     'command': 'sudo openvpn your_vpn_config.ovpn'  # Команда для запуска OpenVPN
 }
@@ -50,3 +50,16 @@ NOTIFICATION_CONFIG = {
     'low_temperature_threshold': -20,   # Порог для уведомления о низкой температуре
     'notification_interval_hours': 1  # Интервал для отправки уведомлений (в часах)
 }
+# Конфигурация Modbus релейного модуля
+RELAY_CONFIG = {
+    'port': 'COM9',                                 # COM-порт к которому подключено реле
+    'address': 3,                                   # адрес реле на шине
+    'baudrate': 9600,                               # скорость обмена данными бит/с
+    'bytesize': 8,                                  # количество бит данных
+    'parity': minimalmodbus.serial.PARITY_NONE,     # контроль четности
+    'stopbits': 1,                                  # количество стоповых бит
+    'timeout': 1,                                   # максимальное время ожидания ответа, сек
+    'channel': 1,                                   # номер канала релейного модуля
+    'fill_factor': 20,                              # коэффициент заполнения %
+    'freq': 60										# цикл в секундах
+    }
