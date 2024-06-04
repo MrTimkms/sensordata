@@ -9,6 +9,8 @@ import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 from flask import send_file
 import logging
+import plotly.express as px
+import plotly.graph_objects as go
 # Импорт модулей с функциями
 NOlocalDASH=localDASH_CONFIG["NOlocalDASH"]
 # Создание экземпляра Dash приложения
@@ -23,31 +25,23 @@ logging.getLogger('dash').setLevel(logging.CRITICAL)
 logging.getLogger('werkzeug').setLevel(logging.CRITICAL)
 def create_graphs():
     import datetime
-    # Установка соединения с базой данных SQLite
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     if NOlocalDASH:
-        # Определение текущей даты
         current_date = datetime.datetime.now()
-
-        # Вычисление начала и конца последнего месяца
-        start_of_last_month = current_date.replace(day=1, hour=0, minute=0, second=0,
-                                                   microsecond=0) - datetime.timedelta(days=1)
+        start_of_last_month = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - datetime.timedelta(days=1)
         start_of_current_month = start_of_last_month.replace(day=1)
         end_of_last_month = start_of_current_month
 
         cursor.execute(
             "SELECT datetime, temperature, humidity, solar_radiation FROM weathergis WHERE datetime BETWEEN ? AND ?",
             (end_of_last_month, current_date))
-
     else:
         cursor.execute("SELECT datetime, temperature, humidity, solar_radiation FROM weathergis")
     rows = cursor.fetchall()
 
-    # Разделение данных на списки
     dates, temperatures, humidities, solar_radiations = zip(*rows)
 
-    # графики для новой таблицы additional_data
     if NOlocalDASH:
         cursor.execute(
             "SELECT datetime, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity FROM additional_data WHERE datetime BETWEEN ? AND ?",
@@ -57,58 +51,31 @@ def create_graphs():
             "SELECT datetime, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity FROM additional_data")
     rows_additional = cursor.fetchall()
 
-    # Разделение данных на списки
-    (
-        dates_additional,
-        solar_input_I,
-        solar_input_W,
-        solar_input_kWh,
-        extern_input_V,
-        bat_charge_V,
-        bat_charge_I,
-        bat_charge_W,
-        bat_total_kWh,
-        bat_capacity,
-    ) = zip(*rows_additional)
+    dates_additional, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity = zip(*rows_additional)
 
-    # Закрытие соединения с базой данных
     conn.close()
-    #return fig1, fig2, fig3
 
-    # Установка соединения с базой данных SQLite
     conn = sqlite3.connect(db_path_cloud)
     cursor = conn.cursor()
-    # графики для облачности
     if NOlocalDASH:
-        # Запросы для извлечения данных
         cursor.execute("SELECT datetime, clouds FROM screenshots WHERE datetime BETWEEN ? AND ?", (end_of_last_month, current_date))
     else:
         cursor.execute("SELECT datetime, clouds FROM screenshots")
     cloud_rows = cursor.fetchall()
 
-    # Разделение данных на списки
     cloud_dates, cloud_values = zip(*cloud_rows) if cloud_rows else ([], [])
 
-    # Закрытие соединения с базой данных
     conn.close()
 
-        # Возвращаем все необходимые данные для создания графиков
     return (
         dates, temperatures, humidities, solar_radiations,
-        dates_additional,
-        solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W,
-        bat_total_kWh, bat_capacity, cloud_dates, cloud_values
+        dates_additional, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity, cloud_dates, cloud_values
     )
-
 def create_figures():
-    data = create_graphs()  # Получаем данные из функции create_graphs
+    data = create_graphs()
 
-    # Разделение данных
-    (dates, temperatures, humidities, solar_radiations,
-     dates_additional,
-     solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity, cloud_dates, cloud_values) = data
+    dates, temperatures, humidities, solar_radiations, dates_additional, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity, cloud_dates, cloud_values = data
 
-    # Создание графиков на основе данных
     fig1 = px.line(x=dates, y=solar_radiations, title='Солнечная радиация')
     fig1.update_xaxes(title_text='Дата')
     fig1.update_yaxes(title_text='Солнечная радиация (W/m²)')
@@ -123,66 +90,59 @@ def create_figures():
     fig3.update_yaxes(title_text='Влажность (%)')
     fig3.update_traces(line=dict(color='blue'))
 
-    # Создание графика для Solar Input 1
-    fig4 = px.line(x=dates_additional, y=solar_input_I, title='Входной ток I (additional_data)',
-                   labels={'x': 'Дата', 'y': 'Solar Input I'})
+    fig4 = px.line(x=dates_additional, y=solar_input_I, title='Входной ток I (additional_data)', labels={'x': 'Дата', 'y': 'Solar Input I'})
     fig4.update_xaxes(title_text='Дата')
     fig4.update_yaxes(title_text='Solar Input I')
 
-    # Создание графика для Solar Input W
     fig5 = px.line(x=dates_additional, y=solar_input_W, title='Входная мощность W (additional_data)')
     fig5.update_xaxes(title_text='Дата')
     fig5.update_yaxes(title_text='Solar Input W')
 
-    # Создание графика для Solar Input KwH
-    fig6 = px.line(x=dates_additional, y=solar_input_kWh, title='Входная энергия KwH (additional_data)',
-                   labels={'x': 'Дата', 'y': 'Solar Input KwH'})
+    fig6 = px.line(x=dates_additional, y=solar_input_kWh, title='Входная энергия KwH (additional_data)', labels={'x': 'Дата', 'y': 'Solar Input KwH'})
     fig6.update_xaxes(title_text='Дата')
     fig6.update_yaxes(title_text='Solar Input KwH')
 
-    # Создание графика для Extern Input V (Гистограмма)
-    fig7 = px.line(x=dates_additional, y=extern_input_V, title='Входное напряжение V (additional_data)',
-                   labels={'x': 'Дата', 'y': 'Input V'})
+    fig7 = px.line(x=dates_additional, y=extern_input_V, title='Входное напряжение V (additional_data)', labels={'x': 'Дата', 'y': 'Input V'})
     fig7.update_xaxes(title_text='Дата')
     fig7.update_yaxes(title_text='Input V')
 
-    # Создание графика для BatV (Scatter с линиями)
-    fig8 = px.line(x=dates_additional, y=bat_charge_V, title=' Напряжение на батарее V (additional_data)',
-                   labels={'x': 'Дата', 'y': 'BatV'})
+    fig8 = px.line(x=dates_additional, y=bat_charge_V, title='Напряжение на батарее V (additional_data)', labels={'x': 'Дата', 'y': 'BatV'})
     fig8.update_xaxes(title_text='Дата')
     fig8.update_yaxes(title_text='BatV')
 
-    # Создание графика для Bat Charge 1 (Линейный график)
-    fig9 = px.line(x=dates_additional, y=bat_charge_I, title='Ток на батарее I (additional_data)',
-                   labels={'x': 'Дата', 'y': 'bat charge I'})
+    fig9 = px.line(x=dates_additional, y=bat_charge_I, title='Ток на батарее I (additional_data)', labels={'x': 'Дата', 'y': 'bat charge I'})
     fig9.update_xaxes(title_text='Дата')
     fig9.update_yaxes(title_text='bat charge I')
 
-    # Создание графика для Bat Charge W (Линейный график)
-    fig10 = px.line(x=dates_additional, y=bat_charge_W, title='Мощность батареи W (additional_data)',
-                    labels={'x': 'Дата', 'y': 'Bat Charge W'})
+    fig10 = px.line(x=dates_additional, y=bat_charge_W, title='Мощность батареи W (additional_data)', labels={'x': 'Дата', 'y': 'Bat Charge W'})
     fig10.update_xaxes(title_text='Дата')
     fig10.update_yaxes(title_text='bat_charge_W')
 
-    # Создание графика для Bat Total KwH (Scatter 3D)
-    fig11 = px.line(x=dates_additional, y=bat_total_kWh,
-                    title='Энергия батареи kWh(additional_data)',
-                    labels={'x': 'Дата', 'y': 'Bat Total KwH'})
+    fig11 = px.line(x=dates_additional, y=bat_total_kWh, title='Энергия батареи kWh (additional_data)', labels={'x': 'Дата', 'y': 'Bat Total KwH'})
     fig11.update_xaxes(title_text='Дата')
     fig11.update_yaxes(title_text='Bat Total KwH')
 
-    # Создание графика для Bat Capacity (Scatter с линиями)
-    fig12 = px.line(x=dates_additional, y=bat_capacity, title='Емкость батареи (additional_data)',
-                    labels={'x': 'Дата', 'y': 'Bat Capacity'})
+    fig12 = px.line(x=dates_additional, y=bat_capacity, title='Емкость батареи (additional_data)', labels={'x': 'Дата', 'y': 'Bat Capacity'})
     fig12.update_xaxes(title_text='Дата')
     fig12.update_yaxes(title_text='Bat Capacity')
 
-    # Создание графика облачности
-    fig13 = px.line(x=cloud_dates, y=cloud_values, title='Облачность %',
-                    labels={'x': 'Дата', 'y': 'Облачность %'})
+    fig13 = px.line(x=cloud_dates, y=cloud_values, title='Облачность %', labels={'x': 'Дата', 'y': 'Облачность %'})
     fig13.update_xaxes(title_text='Дата')
     fig13.update_yaxes(title_text='Облачность %')
-    return fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12, fig13
+
+    # Создание комбинированного графика для облачности и солнечной радиации
+    fig_combined = go.Figure()
+    fig_combined.add_trace(go.Scatter(x=cloud_dates, y=cloud_values, mode='lines', name='Облачность %', yaxis='y2', line=dict(color='blue')))
+    fig_combined.add_trace(go.Scatter(x=dates, y=solar_radiations, mode='lines', name='Солнечная радиация (W/m²)', line=dict(color='orange')))
+
+    fig_combined.update_layout(
+        title='Облачность и Солнечная радиация',
+        xaxis_title='Дата',
+        yaxis=dict(title='Солнечная радиация (W/m²)', titlefont=dict(color='orange'), tickfont=dict(color='orange')),
+        yaxis2=dict(title='Облачность %', titlefont=dict(color='blue'), tickfont=dict(color='blue'), anchor='free', overlaying='y', side='right', position=1)
+    )
+
+    return fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12, fig13, fig_combined
 def func(n_clicks):
     if n_clicks is not None:
         return {
@@ -198,10 +158,8 @@ def func(n_clicks):
      Input('interval-component', 'n_intervals')]
 )
 def update_graphs(selected_graphs, n_intervals):
-    # Вызовем процедуру create_figures() для получения новых данных
-    fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12, fig13 = create_figures()
+    fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12, fig13, fig_combined = create_figures()
 
-    # Создадим словарь графиков заново
     graphs = {
         'Солнечная радиация': dcc.Graph(id='graph1', figure=fig1),
         'Температура': dcc.Graph(id='graph2', figure=fig2),
@@ -216,22 +174,20 @@ def update_graphs(selected_graphs, n_intervals):
         'Энергия батареи kWh': dcc.Graph(id='graph11', figure=fig11),
         'Емкость батареи': dcc.Graph(id='graph12', figure=fig12),
         'Облачность %': dcc.Graph(id='graph13', figure=fig13),
+        'Облачность и Солнечная радиация': dcc.Graph(id='graph14', figure=fig_combined),
     }
 
-    # Отобразим графики в зависимости от выбранных пользователем
     graphs_to_show = []
-    if not selected_graphs:  # Если нет выбранных графиков, отобразить первый график по умолчанию
-        default_graph_name = list(graphs.keys())[0]  # Получить имя первого графика из словаря graphs
+    if not selected_graphs:
+        default_graph_name = list(graphs.keys())[0]
         graphs_to_show.append(dcc.Graph(figure=graphs[default_graph_name].figure))
     else:
         for graph_name in selected_graphs:
             if graph_name in graphs:
                 graphs_to_show.append(dcc.Graph(figure=graphs[graph_name].figure))
-            #else:
-                #graphs_to_show.append(html.Div(f"График '{graph_name}' не найден"))
+
     return graphs_to_show
 def setup_layout():
-    # Определение списка графиков
     graphs = {
         'Солнечная радиация': dcc.Graph(id='graph1', figure=fig1),
         'Температура': dcc.Graph(id='graph2', figure=fig2),
@@ -246,31 +202,30 @@ def setup_layout():
         'Энергия батареи kWh': dcc.Graph(id='graph11', figure=fig11),
         'Емкость батареи': dcc.Graph(id='graph12', figure=fig12),
         'Облачность %': dcc.Graph(id='graph13', figure=fig13),
+        'Облачность и Солнечная радиация': dcc.Graph(id='graph14', figure=fig_combined),
     }
-    # Создание интерактивного элемента управления
     dropdown = dcc.Dropdown(
         id='graph-dropdown',
         options=[{'label': graph_name, 'value': graph_name} for graph_name in graphs.keys()],
-        multi=True  # Разрешить выбор только одного графика
+        multi=True
     )
     app.layout = html.Div([
         html.H1(children='Дашборд по солнечной радиации и погоде'),
-        html.A("Скачать БД", id="download-db-link", href="/download/1.3_SolarData_ExpU.db", className='btn btn-dark',
-               target="_blank"),
-        html.A("Скачать базу данных облачности", href="/download/cloud_data_db", className='btn btn-primary',
-               target="_blank"),
+        html.A("Скачать БД", id="download-db-link", href="/download/1.3_SolarData_ExpU.db", className='btn btn-dark', target="_blank"),
+        html.A("Скачать базу данных облачности", href="/download/cloud_data_db", className='btn btn-primary', target="_blank"),
         dcc.Download(id="download-data"),
-        html.Br(),  # Перенос строки
+        html.Br(),
         html.H1(children='Динамическое управление графиками'),
         dropdown,
         html.Div(id='graph-container'),
         dcc.Interval(
             id='interval-component',
-            interval=1 * 1000 * 3600,  # обновление каждую секунду
+            interval=1 * 1000 * 3600,
             n_intervals=0
         )
     ])
-fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12, fig13 = create_figures()
+
+fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12, fig13, fig_combined = create_figures()
 def run_server():
     setup_layout()
     @app.server.route("/download/1.3_SolarData_ExpU.db")

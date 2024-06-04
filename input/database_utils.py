@@ -109,7 +109,6 @@ def process_data(data):
             char.isdigit() or char.lower() == 'o' or char == '.')
         try:
             if not filtered_data:
-                logging.warning(f"Empty data after processing: original data='{data}'")
                 return 0.0
             return float(filtered_data)
         except ValueError as e:
