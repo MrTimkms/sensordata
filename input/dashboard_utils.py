@@ -74,21 +74,23 @@ def create_graphs():
     # Закрытие соединения с базой данных
     conn.close()
     #return fig1, fig2, fig3
+
+    # Установка соединения с базой данных SQLite
+    conn = sqlite3.connect(db_path_cloud)
+    cursor = conn.cursor()
     # графики для облачности
     if NOlocalDASH:
-        # Установка соединения с базой данных SQLite
-        conn = sqlite3.connect(db_path_cloud)
-        cursor = conn.cursor()
-
         # Запросы для извлечения данных
+        cursor.execute("SELECT datetime, clouds FROM screenshots WHERE datetime BETWEEN ? AND ?", (end_of_last_month, current_date))
+    else:
         cursor.execute("SELECT datetime, clouds FROM screenshots")
-        cloud_rows = cursor.fetchall()
+    cloud_rows = cursor.fetchall()
 
-        # Разделение данных на списки
-        cloud_dates, cloud_values = zip(*cloud_rows) if cloud_rows else ([], [])
+    # Разделение данных на списки
+    cloud_dates, cloud_values = zip(*cloud_rows) if cloud_rows else ([], [])
 
-        # Закрытие соединения с базой данных
-        conn.close()
+    # Закрытие соединения с базой данных
+    conn.close()
 
         # Возвращаем все необходимые данные для создания графиков
     return (

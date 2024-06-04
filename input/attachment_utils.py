@@ -59,36 +59,52 @@ def attempt_download():
                         file.write(part.get_payload(decode=True))
                     print(f"Вложение {file_name} сохранено")
 
-                    with open(file_path, 'r') as csv_file:
-                        csv_reader = csv.reader(csv_file)
-                        header = next(csv_reader, None)
-                        if not header:
-                            header = ["datetime", "temperature", "humidity", "solar_radiation"]
+                    # Попытка прочитать файл в нескольких кодировках
+                    for encoding in ['utf-8', 'windows-1251', 'iso-8859-1']:
+                        try:
+                            with open(file_path, 'r', encoding=encoding) as csv_file:
+                                csv_reader = csv.reader(csv_file)
+                                header = next(csv_reader, None)
+                                if not header:
+                                    header = ["datetime", "temperature", "humidity", "solar_radiation"]
 
-                        for row in csv_reader:
-                            datetime_row = row[0]
-                            try:
-                                temperature = float(row[1])
-                                humidity = float(row[2])
-                                solar_radiation = float(row[3])
-                                solar_input_I = row[4]
-                                solar_input_W = row[5]
-                                solar_input_kWh = row[6]
-                                extern_input_V = row[7]
-                                bat_charge_V = row[8]
-                                bat_charge_I = row[9]
-                                bat_charge_W = row[10]
-                                bat_total_kWh = row[11]
-                                bat_capacity = row[12]
-                                insert_solar_data(city_id=4853, datetime=datetime_row, temperature=temperature,
-                                                  humidity=humidity, solar_radiation=solar_radiation,
-                                                  solar_input_I=solar_input_I, solar_input_W=solar_input_W,
-                                                  solar_input_kWh=solar_input_kWh, extern_input_V=extern_input_V,
-                                                  bat_charge_V=bat_charge_V, bat_charge_I=bat_charge_I,
-                                                  bat_charge_W=bat_charge_W, bat_total_kWh=bat_total_kWh,
-                                                  bat_capacity=bat_capacity)
-                            except (ValueError, IndexError) as e:
-                                print(f"Пропущена строка CSV из-за неверных данных: {row} - {e}")
+                                for row in csv_reader:
+                                    if len(row) < 4:
+                                        print(f"Пропущена строка CSV из-за недостаточного количества данных: {row}")
+                                        continue
+
+                                    datetime_row = row[0]
+                                    try:
+                                        temperature = float(row[1]) if row[1] else 0.0
+                                        humidity = float(row[2]) if row[2] else 0.0
+                                        solar_radiation = float(row[3]) if row[3] else 0.0
+
+                                        if None in [temperature, humidity, solar_radiation]:
+                                            print(f"Пропущена строка CSV из-за пустых основных данных: {row}")
+                                            continue
+
+                                        solar_input_I = (row[4])
+                                        solar_input_W = (row[5])
+                                        solar_input_kWh = (row[6])
+                                        extern_input_V = (row[7])
+                                        bat_charge_V = (row[8])
+                                        bat_charge_I = (row[9])
+                                        bat_charge_W = (row[10])
+                                        bat_total_kWh = (row[11])
+                                        bat_capacity = (row[12])
+
+                                        insert_solar_data(city_id=4853, datetime=datetime_row, temperature=temperature,
+                                                          humidity=humidity, solar_radiation=solar_radiation,
+                                                          solar_input_I=solar_input_I, solar_input_W=solar_input_W,
+                                                          solar_input_kWh=solar_input_kWh, extern_input_V=extern_input_V,
+                                                          bat_charge_V=bat_charge_V, bat_charge_I=bat_charge_I,
+                                                          bat_charge_W=bat_charge_W, bat_total_kWh=bat_total_kWh,
+                                                          bat_capacity=bat_capacity)
+                                    except (ValueError, IndexError) as e:
+                                        print(f"Пропущена строка CSV из-за неверных данных: {row} - {e}")
+                            break  # Если файл успешно прочитан, выходим из цикла по кодировкам
+                        except UnicodeDecodeError:
+                            print(f"Ошибка при чтении файла {file_name} в кодировке {encoding}. Пробуем другую кодировку.")
         return True
     except Exception as e:
         print(f"Произошла ошибка при загрузке вложений: {e}")
