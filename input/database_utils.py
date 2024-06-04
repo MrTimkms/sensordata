@@ -1,3 +1,4 @@
+import logging
 import os
 import sqlite3
 import requests
@@ -44,36 +45,79 @@ def create_additional_table():
 
     conn.commit()
     conn.close()
-def insert_solar_data(city_id, datetime, temperature, humidity, solar_radiation, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity):
-    conn = sqlite3.connect(DATABASE_PATH)
-    c = conn.cursor()
-
-    # Создание уникального идентификатора для записи без пробелов и разделителей
-    original_unique_id = f"{city_id}{datetime}"
-    compact_unique_id = original_unique_id.replace(" ", "").replace("-", "").replace(":", "")
-
-    # Вставка данных в основную таблицу
-    c.execute(
-        "INSERT OR IGNORE INTO weathergis (unique_id, city_id, datetime, temperature, humidity, solar_radiation) VALUES (?, ?, ?, ?, ?, ?)",
-        (compact_unique_id, city_id, datetime, temperature, humidity, solar_radiation))
-
-    # Вставка данных в дополнительную таблицу
-    c.execute(
-        "INSERT OR IGNORE INTO additional_data (unique_id, datetime, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (compact_unique_id, datetime, solar_input_1, solar_input_w, solar_input_kwh, extern_input_v, batv, bat_charge_1, bat_charge_w, bat_total_kwh, bat_capacity))
-
-    conn.commit()
-    conn.close()
-def process_data(data):
-    # Удаляем все буквы, кроме о, которую заменяем на 0
-    filtered_data = ''.join(
-        '0' if char.lower() == 'o' else char for char in data if char.isdigit() or char.lower() == 'o' or char == '.')
-
-    # Пробуем преобразовать в число
+def insert_solar_data(city_id, datetime, temperature, humidity, solar_radiation, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity):
     try:
-        return float(filtered_data) if filtered_data else None
-    except ValueError:
-        return None
+        conn = sqlite3.connect(DATABASE_PATH)
+        c = conn.cursor()
+
+        original_unique_id = f"{city_id}{datetime}"
+        compact_unique_id = original_unique_id.replace(" ", "").replace("-", "").replace(":", "")
+
+        # Обработка данных
+        temperature = process_data(temperature)
+        humidity = process_data(humidity)
+        solar_radiation = process_data(solar_radiation)
+        solar_input_I = process_data(solar_input_I)
+        solar_input_W = process_data(solar_input_W)
+        solar_input_kWh = process_data(solar_input_kWh)
+        extern_input_V = process_data(extern_input_V)
+        bat_charge_V = process_data(bat_charge_V)
+        bat_charge_I = process_data(bat_charge_I)
+        bat_charge_W = process_data(bat_charge_W)
+        bat_total_kWh = process_data(bat_total_kWh)
+        bat_capacity = process_data(bat_capacity)
+
+        data_to_insert = [
+            temperature, humidity, solar_radiation, solar_input_I, solar_input_W,
+            solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I,
+            bat_charge_W, bat_total_kWh, bat_capacity
+        ]
+
+        # Проверка на наличие None после обработки
+        if any(d is None for d in data_to_insert):
+            logging.error(f"Ошибка: один из параметров является None после обработки данных: {data_to_insert}")
+            return
+
+        # Вставка данных в основную таблицу
+        c.execute(
+            "INSERT OR IGNORE INTO weathergis (unique_id, city_id, datetime, temperature, humidity, solar_radiation) VALUES (?, ?, ?, ?, ?, ?)",
+            (compact_unique_id, city_id, datetime, temperature, humidity, solar_radiation))
+
+        # Вставка данных в дополнительную таблицу
+        c.execute(
+            "INSERT OR IGNORE INTO additional_data (unique_id, datetime, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (compact_unique_id, datetime, solar_input_I, solar_input_W, solar_input_kWh, extern_input_V, bat_charge_V, bat_charge_I, bat_charge_W, bat_total_kWh, bat_capacity))
+
+        conn.commit()
+        logging.info(f"Data inserted successfully for unique_id: {compact_unique_id}")
+    except Exception as e:
+        logging.error(f"Error inserting data for unique_id {compact_unique_id}: {e}")
+    finally:
+        conn.close()
+
+
+def process_data(data):
+    if data is None:
+        return 0.0
+
+    if isinstance(data, (int, float)):
+        return data
+
+    if isinstance(data, str):
+        filtered_data = ''.join(
+            '0' if char.lower() == 'o' else char for char in data if
+            char.isdigit() or char.lower() == 'o' or char == '.')
+        try:
+            if not filtered_data:
+                logging.warning(f"Empty data after processing: original data='{data}'")
+                return 0.0
+            return float(filtered_data)
+        except ValueError as e:
+            logging.error(f"Error converting data to float: '{filtered_data}' from original data='{data}' - {e}")
+            return 0.0
+
+    logging.warning(f"Unsupported data type: {type(data)} with value: {data}")
+    return 0.0
 
 
 def fetch_and_store_cloud_data(api_url_base, date):

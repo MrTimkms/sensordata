@@ -15,36 +15,32 @@ NOlocalDASH=localDASH_CONFIG["NOlocalDASH"]
 def download_all_attachments():
     print("Попытка загрузить вложения...")
     if NOlocalDASH:
-        global attempt_count  # Объявляем, что используем глобальную переменную
-        max_attempts = 2  # Максимальное количество попыток
+        global attempt_count
+        max_attempts = 2
         success = attempt_download()
         if success:
             print("Вложения успешно загружены.")
             attempt_count = 0
-            return True  # Успешно загружено
-            # Если неудачно, увеличиваем счетчик
+            return True
         else:
             print("Не удалось загрузить вложения.")
             attempt_count += 1
             if attempt_count >= max_attempts:
                 notify_users()
-                send_email("Ошибка", "Не найдены вложения csv файлов, срочно проверить установку", "",
-                           "gtimjob@gmail.com")
-            return False  # Неудачная попытка после максимального количества попыток
+                send_email("Ошибка", "Не найдены вложения csv файлов, срочно проверить установку", "", "gtimjob@gmail.com")
+            return False
     return False
 
 def attempt_download():
     try:
-        # Подключение к почтовому серверу
         mail = imaplib.IMAP4_SSL(IMAP_CONFIG['server'], IMAP_CONFIG['port'])
         mail.login(IMAP_CONFIG['login'], IMAP_CONFIG['password'])
         mail.select('inbox')
 
-        # Поиск всех непрочитанных писем
         result, email_ids = mail.search(None, '(UNSEEN)')
         if result != "OK":
             print("Ошибка при поиске писем:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            return False  # Возврат False, если поиск писем не удался
+            return False
 
         for email_id in email_ids[0].split():
             mail_data = mail.fetch(email_id, '(RFC822)')[1]
@@ -71,32 +67,28 @@ def attempt_download():
 
                         for row in csv_reader:
                             datetime_row = row[0]
-                            temperature = float(row[1])
-                            humidity = float(row[2])
-                            solar_radiation = float(row[3])
-                            if len(row) >= 13:
-                                continue
                             try:
-                                solar_input_1 = process_data(row[4])
-                                solar_input_w = process_data(row[5])
-                                solar_input_kwh = process_data(row[6])
-                                extern_input_v = process_data(row[7])
-                                batv = process_data(process_data(row[8]))
-                                bat_charge_1 = process_data(row[9])
-                                bat_charge_w = process_data(row[10])
-                                bat_total_kwh = process_data(row[11])
-                                bat_capacity = process_data(row[12])
+                                temperature = float(row[1])
+                                humidity = float(row[2])
+                                solar_radiation = float(row[3])
+                                solar_input_I = row[4]
+                                solar_input_W = row[5]
+                                solar_input_kWh = row[6]
+                                extern_input_V = row[7]
+                                bat_charge_V = row[8]
+                                bat_charge_I = row[9]
+                                bat_charge_W = row[10]
+                                bat_total_kWh = row[11]
+                                bat_capacity = row[12]
                                 insert_solar_data(city_id=4853, datetime=datetime_row, temperature=temperature,
-                                                  humidity=humidity,
-                                                  solar_radiation=solar_radiation, solar_input_1=solar_input_1,
-                                                  solar_input_w=solar_input_w,
-                                                  solar_input_kwh=solar_input_kwh, extern_input_v=extern_input_v,
-                                                  batv=batv,
-                                                  bat_charge_1=bat_charge_1, bat_charge_w=bat_charge_w,
-                                                  bat_total_kwh=bat_total_kwh,
+                                                  humidity=humidity, solar_radiation=solar_radiation,
+                                                  solar_input_I=solar_input_I, solar_input_W=solar_input_W,
+                                                  solar_input_kWh=solar_input_kWh, extern_input_V=extern_input_V,
+                                                  bat_charge_V=bat_charge_V, bat_charge_I=bat_charge_I,
+                                                  bat_charge_W=bat_charge_W, bat_total_kWh=bat_total_kWh,
                                                   bat_capacity=bat_capacity)
-                            except ValueError:
-                                print(f"Пропущена строка CSV из-за неверных данных: {row}")
+                            except (ValueError, IndexError) as e:
+                                print(f"Пропущена строка CSV из-за неверных данных: {row} - {e}")
         return True
     except Exception as e:
         print(f"Произошла ошибка при загрузке вложений: {e}")

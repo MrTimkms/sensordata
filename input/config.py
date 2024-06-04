@@ -24,5 +24,5 @@ Mail_CONFIG = {
     'password': 'lbehqvlictarghue'                  # пароль
 }
 localDASH_CONFIG = {
-    'NOlocalDASH': False
+    'NOlocalDASH': True
 }
