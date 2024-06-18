@@ -139,7 +139,7 @@ def create_figures():
         title='Облачность и Солнечная радиация',
         xaxis_title='Дата',
         yaxis=dict(title='Солнечная радиация (W/m²)', titlefont=dict(color='orange'), tickfont=dict(color='orange')),
-        yaxis2=dict(title='Облачность %', titlefont=dict(color='blue'), tickfont=dict(color='blue'), anchor='free', overlaying='y', side='right', position=1)
+        yaxis2=dict(title='Облачность %', titlefont=dict(color='blue'), tickfont=dict(color='blue'), anchor='free', overlaying='y', side='right', position=1, autorange='reversed')
     )
 
     return fig1, fig2, fig3, fig4, fig5, fig6, fig7, fig8, fig9, fig10, fig11, fig12, fig13, fig_combined
